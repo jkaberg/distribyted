@@ -24,7 +24,7 @@ func NewHandler(fuseAllowOther bool, path string) *Handler {
 	}
 }
 
-func (s *Handler) Mount(fss map[string]fs.Filesystem) error {
+func (s *Handler) Mount(cfs *fs.ContainerFs) error {
 	folder := s.path
 	// On windows, the folder must don't exist
 	if runtime.GOOS == "windows" {
@@ -37,11 +37,6 @@ func (s *Handler) Mount(fss map[string]fs.Filesystem) error {
 		}
 	}
 
-	cfs, err := fs.NewContainerFs(fss)
-	if err != nil {
-		return err
-	}
-
 	host := fuse.NewFileSystemHost(NewFS(cfs))
 
 	// TODO improve error handling here
@@ -51,6 +46,23 @@ func (s *Handler) Mount(fss map[string]fs.Filesystem) error {
 		if s.fuseAllowOther {
 			config = append(config, "-o", "allow_other")
 		}
+
+		// Increase read sizes for higher throughput on Linux
+		if runtime.GOOS == "linux" {
+			config = append(config, "-o", "big_writes")
+			config = append(config, "-o", "max_read=1048576")
+		}
+
+		// Improve kernel cache behavior and watcher compatibility for tools like
+		// Jellyfin/Plex. These options do not guarantee inotify for out-of-band
+		// updates, but they reduce caching and provide stable inode numbers so
+		// downstream scanners behave more predictably.
+		config = append(config, "-o", "use_ino")
+		config = append(config, "-o", "attr_timeout=0")
+		config = append(config, "-o", "entry_timeout=0")
+		config = append(config, "-o", "negative_timeout=0")
+		config = append(config, "-o", "fsname=distribyted")
+		config = append(config, "-o", "subtype=distribyted")
 
 		ok := host.Mount(s.path, config)
 		if !ok {

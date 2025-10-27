@@ -32,12 +32,12 @@ func (fs *FS) Open(path string, flags int) (errc int, fh uint64) {
 	fh, err := fs.fh.OpenHolder(path)
 	if os.IsNotExist(err) {
 		fs.log.Debug().Str("path", path).Msg("file does not exists")
-		return -fuse.ENOENT, fhNone
+		return -int(fuse.ENOENT), fhNone
 
 	}
 	if err != nil {
 		fs.log.Error().Err(err).Str("path", path).Msg("error opening file")
-		return -fuse.EIO, fhNone
+		return -int(fuse.EIO), fhNone
 	}
 
 	return 0, fh
@@ -53,19 +53,21 @@ func (fs *FS) Getattr(path string, stat *fuse.Stat_t, fh uint64) (errc int) {
 		return 0
 	}
 
-	file, err := fs.fh.GetFile(path, fh)
+	// For getattr, always resolve by path to avoid relying on an open handle
+	file, err := fs.fh.GetFile(path, fhNone)
 	if os.IsNotExist(err) {
 		fs.log.Debug().Str("path", path).Msg("file does not exists")
-		return -fuse.ENOENT
+		return -int(fuse.ENOENT)
 
 	}
 	if err != nil {
 		fs.log.Error().Err(err).Str("path", path).Msg("error getting holder when reading file attributes")
-		return -fuse.EIO
+		return -int(fuse.EIO)
 	}
 
 	if file.IsDir() {
 		stat.Mode = fuse.S_IFDIR | 0555
+		stat.Size = file.Size()
 	} else {
 		stat.Mode = fuse.S_IFREG | 0444
 		stat.Size = file.Size()
@@ -78,12 +80,12 @@ func (fs *FS) Read(path string, dest []byte, off int64, fh uint64) int {
 	file, err := fs.fh.GetFile(path, fh)
 	if os.IsNotExist(err) {
 		fs.log.Error().Err(err).Str("path", path).Msg("file not found on READ operation")
-		return -fuse.ENOENT
+		return -int(fuse.ENOENT)
 
 	}
 	if err != nil {
 		fs.log.Error().Err(err).Str("path", path).Msg("error getting holder reading data from file")
-		return -fuse.EIO
+		return -int(fuse.EIO)
 	}
 
 	end := int(math.Min(float64(len(dest)), float64(int64(file.Size())-off)))
@@ -96,7 +98,7 @@ func (fs *FS) Read(path string, dest []byte, off int64, fh uint64) int {
 	n, err := file.ReadAt(buf, off)
 	if err != nil && err != io.EOF {
 		log.Error().Err(err).Str("path", path).Msg("error reading data")
-		return -fuse.EIO
+		return -int(fuse.EIO)
 	}
 
 	dest = buf[:n]
@@ -106,7 +108,7 @@ func (fs *FS) Read(path string, dest []byte, off int64, fh uint64) int {
 func (fs *FS) Release(path string, fh uint64) int {
 	if err := fs.fh.Remove(fh); err != nil {
 		fs.log.Error().Err(err).Str("path", path).Msg("error getting holder when releasing file")
-		return -fuse.EIO
+		return -int(fuse.EIO)
 	}
 
 	return 0
@@ -127,7 +129,7 @@ func (fs *FS) Readdir(path string,
 	paths, err := fs.fh.ListDir(path)
 	if err != nil {
 		fs.log.Error().Err(err).Str("path", path).Msg("error reading directory")
-		return -fuse.ENOSYS
+		return -int(fuse.ENOSYS)
 	}
 
 	for _, p := range paths {

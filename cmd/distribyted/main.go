@@ -121,28 +121,9 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 		return fmt.Errorf("error creating node ID: %w", err)
 	}
 
-	c, err := torrent.NewClient(st, fis, conf.Torrent, id)
+	c, dlLimiter, ulLimiter, err := torrent.NewClient(st, fis, conf.Torrent, id)
 	if err != nil {
 		return fmt.Errorf("error starting torrent client: %w", err)
-	}
-
-	pcp := filepath.Join(conf.Torrent.MetadataFolder, "piece-completion")
-	if err := os.MkdirAll(pcp, 0744); err != nil {
-		return fmt.Errorf("error creating piece completion folder: %w", err)
-	}
-
-	pc, err := storage.NewBoltPieceCompletion(pcp)
-	if err != nil {
-		return fmt.Errorf("error creating servers piece completion: %w", err)
-	}
-
-	var servers []*torrent.Server
-	for _, s := range conf.Servers {
-		server := torrent.NewServer(c, pc, s)
-		servers = append(servers, server)
-		if err := server.Start(); err != nil {
-			return fmt.Errorf("error starting server: %w", err)
-		}
 	}
 
 	cl := loader.NewConfig(conf.Routes)
@@ -154,11 +135,21 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 		return fmt.Errorf("error starting magnet database: %w", err)
 	}
 
+	// UI-managed routesRoot: <metadata>/routes
+	routesRoot := filepath.Join(conf.Torrent.MetadataFolder, "routes")
+	if err := os.MkdirAll(routesRoot, 0744); err != nil {
+		return fmt.Errorf("error creating routes root: %w", err)
+	}
+
 	ts := torrent.NewService([]loader.Loader{cl, fl}, dbl, ss, c,
 		conf.Torrent.AddTimeout,
 		conf.Torrent.ReadTimeout,
 		conf.Torrent.ContinueWhenAddTimeout,
+		routesRoot,
 	)
+	// store limiters for runtime settings and apply from config
+	ts.SetLimiters(dlLimiter, ulLimiter)
+	_ = ts.SetLimits(conf.Torrent.DownloadLimitMbit, conf.Torrent.UploadLimitMbit)
 
 	var mh *fuse.Handler
 	if conf.Fuse != nil {
@@ -168,15 +159,59 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
+	log.Info().Msg(fmt.Sprintf("setting cache size to %d MB", conf.Torrent.GlobalCacheSize))
+	fc.SetCapacity(conf.Torrent.GlobalCacheSize * 1024 * 1024)
 
+	// Create an empty container FS and attach it before loading torrents so UI can start immediately
+	empty := make(map[string]fs.Filesystem)
+	cfs, err := fs.NewContainerFs(empty)
+	if err != nil {
+		return fmt.Errorf("error creating container fs: %w", err)
+	}
+	ts.SetContainerFs(cfs)
+
+	// Preload saved UI state and start periodic persistence
+	ts.LoadState()
+	ts.StartStatePersistence()
+
+	// Load torrents and start watchers asynchronously to avoid delaying startup
+	var watchers, uiWatchers []*torrent.RouteWatcher
+	go func() {
+		log.Info().Msg("loading torrents in background...")
+		if _, e := ts.Load(); e != nil {
+			log.Error().Err(e).Msg("error when loading torrents")
+		}
+		// Start route watchers for dynamic loading from configured torrent folders
+		var wErr error
+		watchers, wErr = torrent.StartRouteWatchers(ts, conf.Routes)
+		if wErr != nil {
+			log.Error().Err(wErr).Msg("error starting route watchers")
+		}
+		// Also start watchers for UI-managed routes under routesRoot
+		uiWatchers, wErr = torrent.StartRouteWatchersFromRoot(ts, routesRoot)
+		if wErr != nil {
+			log.Error().Err(wErr).Msg("error starting UI route watchers")
+		}
+	}()
+
+	httpfs := torrent.NewHTTPFS(cfs)
+	logFilename := filepath.Join(conf.Log.Path, dlog.FileName)
+
+	go func() {
 		<-sigChan
-		log.Info().Msg("closing servers...")
-		for _, s := range servers {
-			if err := s.Close(); err != nil {
-				log.Warn().Err(err).Msg("problem closing server")
+		log.Info().Msg("closing route watchers...")
+		for _, w := range watchers {
+			if err := w.Close(); err != nil {
+				log.Warn().Err(err).Msg("problem closing route watcher")
 			}
 		}
+		for _, w := range uiWatchers {
+			if err := w.Close(); err != nil {
+				log.Warn().Err(err).Msg("problem closing route watcher")
+			}
+		}
+		// removed: close served folders
+		ts.StopStatePersistence()
 		log.Info().Msg("closing items database...")
 		fis.Close()
 		log.Info().Msg("closing magnet database...")
@@ -192,20 +227,12 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 		os.Exit(1)
 	}()
 
-	log.Info().Msg(fmt.Sprintf("setting cache size to %d MB", conf.Torrent.GlobalCacheSize))
-	fc.SetCapacity(conf.Torrent.GlobalCacheSize * 1024 * 1024)
-
-	fss, err := ts.Load()
-	if err != nil {
-		return fmt.Errorf("error when loading torrents: %w", err)
-	}
-
 	go func() {
 		if mh == nil {
 			return
 		}
 
-		if err := mh.Mount(fss); err != nil {
+		if err := mh.Mount(cfs); err != nil {
 			log.Info().Err(err).Msg("error mounting filesystems")
 		}
 	}()
@@ -217,12 +244,6 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 				port = conf.WebDAV.Port
 			}
 
-			cfs, err := fs.NewContainerFs(fss)
-			if err != nil {
-				log.Error().Err(err).Msg("error adding files to webDAV")
-				return
-			}
-
 			if err := webdav.NewWebDAVServer(cfs, port, conf.WebDAV.User, conf.WebDAV.Pass); err != nil {
 				log.Error().Err(err).Msg("error starting webDAV")
 			}
@@ -231,15 +252,10 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 		log.Warn().Msg("webDAV configuration not found!")
 	}()
 
-	cfs, err := fs.NewContainerFs(fss)
-	if err != nil {
-		return fmt.Errorf("error when loading torrents: %w", err)
-	}
+	// Start health monitor if enabled
+	ts.StartHealthMonitor(conf.Health)
 
-	httpfs := torrent.NewHTTPFS(cfs)
-	logFilename := filepath.Join(conf.Log.Path, dlog.FileName)
-
-	err = http.New(fc, ss, ts, ch, servers, httpfs, logFilename, conf.HTTPGlobal)
+	err = http.New(fc, ss, ts, ch, httpfs, logFilename, conf.HTTPGlobal)
 	log.Error().Err(err).Msg("error initializing HTTP server")
 	return err
 }

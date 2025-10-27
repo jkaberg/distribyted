@@ -2,3 +2,5 @@ distribyted-data
 httpfs_vfsdata.go
 bin/
 coverage.out
+testing/config
+testing/data

@@ -7,22 +7,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var indexHandler = func(c *gin.Context) {
-	c.HTML(http.StatusOK, "index.html", nil)
+//var indexHandler = func(c *gin.Context) {
+//	// Redirect to routes page as the default landing page
+//	c.Redirect(http.StatusFound, "/routes")
+//}
+
+var indexHandler = func(ss *torrent.Stats) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Avoid heavy pre-render stats; UI fetches data asynchronously
+		c.HTML(http.StatusOK, "routes.html", nil)
+	}
 }
 
-var routesHandler = func(ss *torrent.Stats) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "routes.html", ss.RoutesStats())
-	}
+var dashboardHandler = func(c *gin.Context) {
+	c.HTML(http.StatusOK, "index.html", nil)
 }
 
 var logsHandler = func(c *gin.Context) {
 	c.HTML(http.StatusOK, "logs.html", nil)
 }
 
-var serversFoldersHandler = func() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.HTML(http.StatusOK, "servers.html", nil)
-	}
+var settingsHandler = func(c *gin.Context) {
+	c.HTML(http.StatusOK, "settings.html", nil)
 }

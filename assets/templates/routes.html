@@ -1,40 +1,80 @@
-{{#.}}
+<style>
+    /* Compact route tables only */
+    .route-table thead th,
+    .route-table tbody td {
+        padding-top: .25rem;
+        padding-bottom: .25rem;
+    }
+    .route-table .progress {
+        margin-bottom: 0 !important;
+        height: 6px;
+    }
+    .route-table .mdi {
+        font-size: 16px;
+    }
+</style>
+
 <div class="row">
     <div class="col-12">
         <div class="card card-table-border-none">
             <div class="card-header justify-content-between card-header-border-bottom">
-                <h2>Route: {{name}}</h2>
+                <h2>Routes</h2>
             </div>
-            <div class="card-body pt-0 pb-5">
-                <table class="table card-table table-responsive table-responsive-large" style="width:100%">
+            <div class="card-body pt-0 pb-3">
+                <form id="create-route-form" class="form-inline">
+                    <div class="form-group">
+                        <label class="mr-2">New route name</label>
+                        <input type="text" id="new-route-name" class="form-control mr-2" placeholder="e.g. multimedia">
+                    </div>
+                    <button type="submit" class="btn btn-success btn-default">Create</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{#routes}}
+<div class="row">
+    <div class="col-12">
+        <div class="card card-table-border-none">
+            <div class="card-header justify-content-between card-header-border-bottom">
+                <h2 title="{{folder}}">Route: {{name}}</h2>
+                <div class="d-flex align-items-center">
+                    <input type="file" accept=".torrent" id='file-{{name}}' style="display:none" onchange='Distribyted.routes.onFileSelected(event, "{{name}}")'>
+                    <button type="button" class="btn btn-sm btn-primary btn-default mr-2" onclick='Distribyted.routes.triggerFileDialog("{{name}}")'>Upload .torrent</button>
+                    <button type="button" class="btn btn-sm btn-secondary btn-default mr-2" onclick='Distribyted.routes.addMagnet("{{name}}")'>Add magnet</button>
+                    <button class="btn btn-sm btn-danger" onclick='Distribyted.routes.deleteRoute("{{name}}")'>Delete route</button>
+                </div>
+            </div>
+            <div class="card-body pt-0 pb-2">
+                <table class="table table-sm small card-table route-table table-responsive table-responsive-large mb-0" style="width:100%">
                     <thead>
                         <tr>
                             <th style="width: 30%">Name</th>
                             <th style="width: 15%"><i class="mdi mdi-arrow-down"></i> / <i class="mdi mdi-arrow-up"></i>
                             </th>
-                            <th style="width: 15%" class="d-none d-lg-table-cell">Peers/Seeders</th>
+                            <th style="width: 10%" class="d-none d-lg-table-cell">Size</th>
+                            <th style="width: 15%" class="d-none d-lg-table-cell">Health</th>
                             <th style="width: 35%" class="d-none d-lg-table-cell">Status</th>
-                            <th style="width: 5%" >Actions</th>
+                            <th style="width: 5%">Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        {{#torrentStats}}
+                    <tbody id="tbody-{{name}}"></tbody>
+                    <tfoot id="pager-{{name}}" style="display:none">
                         <tr>
-                            <td>{{name}}</td>
-                            <td>{{ibytes downloadedBytes timePassed}} / {{ibytes
-                                uploadedBytes timePassed}}</td>
-                            <td class="d-none d-lg-table-cell">{{{torrent_info peers seeders pieceSize}}}</td>
-                            <td class="d-none d-lg-table-cell">
-                                {{{torrent_status pieceChunks totalPieces}}}
+                            <td colspan="5" class="text-right">
+                                <div class="btn-group btn-group-sm" role="group" aria-label="pager">
+                                    <button type="button" id="prev-{{name}}" class="btn btn-light" onclick='Distribyted.routes.pagePrev("{{name}}")'>Prev</button>
+                                    <span class="mx-2" id="page-{{name}}">1</span>
+                                    <button type="button" id="next-{{name}}" class="btn btn-light" onclick='Distribyted.routes.pageNext("{{name}}")'>Next</button>
+                                </div>
                             </td>
-                            <td><i class="mdi mdi-delete-forever" title="delete torrent" onclick='Distribyted.routes.deleteTorrent("{{../name}}","{{hash}}")'></i></td>
                         </tr>
-                        {{/torrentStats}}
-                    </tbody>
+                    </tfoot>
                 </table>
             </div>
         </div>
     </div>
 </div>
 
-{{/.}}
+{{/routes}}

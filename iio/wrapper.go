@@ -15,7 +15,7 @@ type seekerWrapper struct {
 }
 
 func NewSeekerWrapper(r Reader, size int64) *seekerWrapper {
-	return &seekerWrapper{Reader: r}
+	return &seekerWrapper{Reader: r, size: size}
 }
 
 func (r *seekerWrapper) Seek(offset int64, whence int) (int64, error) {

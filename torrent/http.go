@@ -2,7 +2,7 @@ package torrent
 
 import (
 	"io"
-	"io/fs"
+	iofs "io/fs"
 	"net/http"
 	"os"
 	"sync"
@@ -28,17 +28,20 @@ func (fs *HTTPFS) Open(name string) (http.File, error) {
 	}
 
 	fi := dfs.NewFileInfo(name, f.Size(), f.IsDir())
-
-	// TODO make this lazy
-	fis, err := fs.filesToFileInfo(name)
-	if err != nil {
-		return nil, err
+	// Lazy dir listing: only fetch when directory and on-demand in Readdir
+	var dirEntries []iofs.FileInfo
+	if fi.IsDir() {
+		var derr error
+		dirEntries, derr = fs.filesToFileInfo(name)
+		if derr != nil {
+			return nil, derr
+		}
 	}
 
-	return newHTTPFile(f, fis, fi), nil
+	return newHTTPFile(f, dirEntries, fi), nil
 }
 
-func (fs *HTTPFS) filesToFileInfo(path string) ([]fs.FileInfo, error) {
+func (fs *HTTPFS) filesToFileInfo(path string) ([]iofs.FileInfo, error) {
 	files, err := fs.fs.ReadDir(path)
 	if err != nil {
 		return nil, err
@@ -62,10 +65,10 @@ type httpFile struct {
 	dirPos     int
 	dirContent []os.FileInfo
 
-	fi fs.FileInfo
+	fi iofs.FileInfo
 }
 
-func newHTTPFile(f dfs.File, fis []fs.FileInfo, fi fs.FileInfo) *httpFile {
+func newHTTPFile(f dfs.File, fis []iofs.FileInfo, fi iofs.FileInfo) *httpFile {
 	return &httpFile{
 		dirContent: fis,
 		fi:         fi,
@@ -74,7 +77,7 @@ func newHTTPFile(f dfs.File, fis []fs.FileInfo, fi fs.FileInfo) *httpFile {
 	}
 }
 
-func (f *httpFile) Readdir(count int) ([]fs.FileInfo, error) {
+func (f *httpFile) Readdir(count int) ([]iofs.FileInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -104,6 +107,6 @@ func (f *httpFile) Readdir(count int) ([]fs.FileInfo, error) {
 	return f.dirContent[old:f.dirPos], nil
 }
 
-func (f *httpFile) Stat() (fs.FileInfo, error) {
+func (f *httpFile) Stat() (iofs.FileInfo, error) {
 	return f.fi, nil
 }

@@ -1,33 +1,45 @@
+# syntax=docker/dockerfile:1.5
+
 #===============
 # Stage 1: Build
 #===============
+FROM golang:1.21-alpine AS builder
 
-FROM golang:1.21-alpine as builder
+RUN apk add --no-cache fuse-dev gcc g++ musl-dev make git
 
-ENV BIN_REPO=github.com/distribyted/distribyted
-ENV BIN_PATH=$GOPATH/src/$BIN_REPO
+WORKDIR /app
 
-COPY . $BIN_PATH
-WORKDIR $BIN_PATH
+# Cache go modules first
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
-RUN apk add --no-cache fuse-dev gcc libc-dev g++ make
+# Copy the rest of the source
+COPY . .
 
-RUN BIN_OUTPUT=/bin/distribyted make build
+# Build with cache mounts
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    BIN_OUTPUT=/bin/distribyted make build
 
 #===============
 # Stage 2: Run
 #===============
+FROM alpine:3.20
 
-FROM alpine:3
-
-RUN apk add --no-cache gcc libc-dev fuse-dev
+# Runtime dependencies
+RUN apk add --no-cache fuse libstdc++ libgcc su-exec
 
 COPY --from=builder /bin/distribyted /bin/distribyted
-RUN chmod -v +x /bin/distribyted
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /bin/distribyted /entrypoint.sh \
+    && mkdir -p /data /config \
+    && chmod 0777 /data /config
 
-RUN mkdir -v /distribyted-data
-
-RUN echo "user_allow_other" | tee /etc/fuse.conf
+# FUSE allow_other
+RUN echo "user_allow_other" >> /etc/fuse.conf
 ENV DISTRIBYTED_FUSE_ALLOW_OTHER=true
+ENV DISTRIBYTED_CONFIG=/config/config.yaml
 
-ENTRYPOINT [ "./bin/distribyted" ]
+ENTRYPOINT [ "/entrypoint.sh" ]
+CMD [ "/bin/distribyted" ]

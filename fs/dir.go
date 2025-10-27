@@ -3,10 +3,11 @@ package fs
 var _ File = &Dir{}
 
 type Dir struct {
+	size int64
 }
 
 func (d *Dir) Size() int64 {
-	return 0
+	return d.size
 }
 
 func (d *Dir) IsDir() bool {

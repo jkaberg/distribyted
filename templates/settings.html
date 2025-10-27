@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+
+<head>
+    {{template "header.html" "Settings"}}
+</head>
+
+<body class="header-fixed sidebar-fixed sidebar-dark header-light" id="body">
+    <div class="wrapper">
+        {{template "navbar.html" "settings"}}
+
+        <div class="page-wrapper">
+            <header class="main-header " id="header">
+                <nav class="navbar navbar-static-top navbar-expand-lg">
+                    <button id="sidebar-toggler" class="sidebar-toggle">
+                        <span class="sr-only">Toggle navigation</span>
+                    </button>
+                    <div class="ml-auto" style="display:flex; align-items:center; gap:16px;">
+                        <div id="topbar-stats" style="display:flex; align-items:center; gap:16px;">
+                            <div id="tb-cache-wrap" style="width:40px; height:40px;">
+                                <canvas id="tb-cache"></canvas>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="text-muted" style="font-size:12px;">DL</span>
+                                <span id="tb-dl" style="font-weight:500;">...</span>
+                                <span class="text-muted" style="font-size:12px;">UL</span>
+                                <span id="tb-ul" style="font-weight:500;">...</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span id="tb-ip" class="text-muted" style="font-size:12px;">IP: ...</span>
+                                <span id="tb-conn" class="badge badge-secondary">...</span>
+                            </div>
+                        </div>
+                    </div>
+                </nav>
+            </header>
+
+            <div class="content-wrapper">
+                <div class="content">
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="card card-default">
+                                <div class="card-header card-header-border-bottom">
+                                    <h2>Filesystem watcher</h2>
+                                </div>
+                                <div class="card-body">
+                                    <form id="watch-interval-form-settings" class="form-inline">
+                                        <div class="form-group mr-2">
+                                            <label class="mr-2">Debounce interval (seconds)</label>
+                                            <input type="number" id="watch-interval-settings" min="1" class="form-control" value="5">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-default">Save</button>
+                                    </form>
+                                    <div class="text-muted small mt-2">How often we react to file changes in watched folders. Higher = fewer scans.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="card card-default">
+                                <div class="card-header card-header-border-bottom">
+                                    <h2>Bandwidth Limits</h2>
+                                </div>
+                                <div class="card-body">
+                                    <form id="limits-form" class="form-inline">
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Download (Mbit/s)</label>
+                                            <input type="number" step="0.1" min="0" id="dl-mbit" class="form-control" placeholder="0 = unlimited">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Upload (Mbit/s)</label>
+                                            <input type="number" step="0.1" min="0" id="ul-mbit" class="form-control" placeholder="0 = unlimited">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-default">Save</button>
+                                    </form>
+                                    <div class="text-muted small mt-2">Applies global bandwidth limits. 0 means no limit.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="card card-default">
+                                <div class="card-header card-header-border-bottom">
+                                    <h2>qBittorrent-compatible API</h2>
+                                </div>
+                                <div class="card-body">
+                                    <form id="qbt-form" class="form-inline">
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Enable API</label>
+                                            <input type="checkbox" id="qbt-enabled" class="form-control">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-default">Save</button>
+                                    </form>
+                                    <div class="text-muted small mt-2">Expose a qBittorrent-compatible Web API for Radarr/Sonarr/Lidarr to talk to.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="card card-default">
+                                <div class="card-header card-header-border-bottom">
+                                    <h2>Health Monitor</h2>
+                                </div>
+                                <div class="card-body">
+                                    <form id="health-form" class="form-inline">
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Enabled</label>
+                                            <input type="checkbox" id="health-enabled" class="form-control">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Interval (min)</label>
+                                            <input type="number" min="60" id="health-interval" class="form-control" value="60">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Grace (min)</label>
+                                            <input type="number" min="0" id="health-grace" class="form-control" value="30">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Min seeders</label>
+                                            <input type="number" min="0" id="health-min-seeders" class="form-control" value="2">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Good seeders</label>
+                                            <input type="number" min="0" id="health-good-seeders" class="form-control" value="5">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Excellent seeders</label>
+                                            <input type="number" min="0" id="health-excellent-seeders" class="form-control" value="10">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-default">Save</button>
+                                    </form>
+                                    <div class="text-muted small mt-2">Checks torrent health by seeders/peers every interval; below thresholds are auto-failed and re-requested via Arr.</div>
+                                    <hr/>
+                                    <h5 class="mt-3">Arr Instances</h5>
+                                    <div id="arr-list"></div>
+                                    <button id="arr-add" class="btn btn-sm btn-secondary mt-2">Add Instance</button>
+                                    <div class="text-muted small mt-2">Add one or more Radarr/Sonarr/Lidarr instances (Base URL + API Key). We detect categories from each to decide which routes they own.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- HTTP Server Settings -->
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="card card-default">
+                                <div class="card-header card-header-border-bottom">
+                                    <h2>HTTP Server</h2>
+                                </div>
+                                <div class="card-body">
+                                    <form id="http-form" class="form-inline">
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">IP</label>
+                                            <input type="text" id="http-ip" class="form-control" placeholder="0.0.0.0">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Port</label>
+                                            <input type="number" min="1" id="http-port" class="form-control" placeholder="4444">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">HTTPFS</label>
+                                            <input type="checkbox" id="http-httpfs" class="form-control">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-default">Save</button>
+                                    </form>
+                                    <div class="text-muted small mt-2">Bind address and port for the web UI. HTTPFS serves files over HTTP.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- WebDAV Settings -->
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="card card-default">
+                                <div class="card-header card-header-border-bottom">
+                                    <h2>WebDAV</h2>
+                                </div>
+                                <div class="card-body">
+                                    <form id="webdav-form" class="form-inline">
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Port</label>
+                                            <input type="number" min="1" id="wd-port" class="form-control" placeholder="36911">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">User</label>
+                                            <input type="text" id="wd-user" class="form-control" placeholder="admin">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Pass</label>
+                                            <input type="password" id="wd-pass" class="form-control" placeholder="admin">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-default">Save</button>
+                                    </form>
+                                    <div class="text-muted small mt-2">WebDAV access to mounted torrents.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Torrent Advanced Settings -->
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="card card-default">
+                                <div class="card-header card-header-border-bottom">
+                                    <h2>Torrent (Advanced)</h2>
+                                </div>
+                                <div class="card-body">
+                                    <form id="torrent-form" class="form-inline">
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Add Timeout (s)</label>
+                                            <input type="number" min="1" id="tor-addto" class="form-control" placeholder="60">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Read Timeout (s)</label>
+                                            <input type="number" min="1" id="tor-readto" class="form-control" placeholder="120">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Continue on Add Timeout</label>
+                                            <input type="checkbox" id="tor-continue" class="form-control">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Cache Size (MB)</label>
+                                            <input type="number" min="0" id="tor-cache" class="form-control" placeholder="2048">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Metadata Folder</label>
+                                            <input type="text" id="tor-meta" class="form-control" style="min-width:320px">
+                                        </div>
+                                        <div class="w-100 my-2"></div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Disable IPv6</label>
+                                            <input type="checkbox" id="tor-noipv6" class="form-control">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Disable TCP</label>
+                                            <input type="checkbox" id="tor-notcp" class="form-control">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Disable UTP</label>
+                                            <input type="checkbox" id="tor-noutp" class="form-control">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Public IP</label>
+                                            <input type="text" id="tor-ip" class="form-control" placeholder="">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Listen Port</label>
+                                            <input type="number" min="0" id="tor-port" class="form-control" placeholder="0=auto">
+                                        </div>
+                                        <div class="w-100 my-2"></div>
+                                        <div class="form-group mr-3" style="min-width:420px;">
+                                            <label class="mr-2">Extra Trackers (one per line)</label>
+                                            <textarea id="tor-extra-trackers" class="form-control" rows="3" style="min-width:420px" placeholder="udp://tracker.opentrackr.org:1337/announce"></textarea>
+                                        </div>
+                                        <div class="form-group mr-3" style="min-width:420px;">
+                                            <label class="mr-2">Extra Trackers URL</label>
+                                            <input type="text" id="tor-extra-trackers-url" class="form-control" style="min-width:420px" placeholder="https://example.com/trackers.txt">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Reader Pool Size</label>
+                                            <input type="number" min="1" id="tor-pool" class="form-control" placeholder="4">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Readahead (MB)</label>
+                                            <input type="number" min="0" id="tor-readahead" class="form-control" placeholder="2">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-default">Save</button>
+                                    </form>
+                                    <div class="text-muted small mt-2">Advanced torrent client behavior and resource limits. Some changes may require restart.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FUSE Settings -->
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="card card-default">
+                                <div class="card-header card-header-border-bottom">
+                                    <h2>FUSE</h2>
+                                </div>
+                                <div class="card-body">
+                                    <form id="fuse-form" class="form-inline">
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Allow other</label>
+                                            <input type="checkbox" id="fuse-allow" class="form-control">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Path</label>
+                                            <input type="text" id="fuse-path" class="form-control" style="min-width:320px" placeholder="/data/mount">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-default">Save</button>
+                                    </form>
+                                    <div class="text-muted small mt-2">Mount point and permissions for the filesystem view.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Log Settings -->
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="card card-default">
+                                <div class="card-header card-header-border-bottom">
+                                    <h2>Logging</h2>
+                                </div>
+                                <div class="card-body">
+                                    <form id="log-form" class="form-inline">
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Debug</label>
+                                            <input type="checkbox" id="log-debug" class="form-control">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Path</label>
+                                            <input type="text" id="log-path" class="form-control" style="min-width:320px">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Max backups</label>
+                                            <input type="number" min="0" id="log-backups" class="form-control" placeholder="2">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Max size (MB)</label>
+                                            <input type="number" min="1" id="log-size" class="form-control" placeholder="50">
+                                        </div>
+                                        <div class="form-group mr-3">
+                                            <label class="mr-2">Max age (days)</label>
+                                            <input type="number" min="0" id="log-age" class="form-control" placeholder="0">
+                                        </div>
+                                        <button type="submit" class="btn btn-primary btn-default">Save</button>
+                                    </form>
+                                    <div class="text-muted small mt-2">Log file rotation settings. Changes apply to new sessions.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <footer class="footer mt-auto">
+                    <div class="copyright bg-white"></div>
+                </footer>
+            </div>
+
+            {{template "footer.html"}}
+            <script>
+                // Init values
+                fetch('/api/watch_interval').then(r => r.json()).then(j => {
+                    if (j && j.interval) document.getElementById('watch-interval-settings').value = j.interval
+                })
+                fetch('/api/settings/limits').then(r => r.json()).then(j => {
+                    if (j) {
+                        document.getElementById('dl-mbit').value = j.downloadMbit || 0
+                        document.getElementById('ul-mbit').value = j.uploadMbit || 0
+                    }
+                })
+                fetch('/api/settings/qbt').then(r => r.json()).then(j => {
+                    if (j) {
+                        document.getElementById('qbt-enabled').checked = !!j.enabled
+                    }
+                })
+                fetch('/api/settings/health').then(r => r.json()).then(j => {
+                    if (j) {
+                        document.getElementById('health-enabled').checked = !!j.enabled
+                        document.getElementById('health-interval').value = j.intervalMinutes || 60
+                        document.getElementById('health-grace').value = j.graceMinutes || 30
+                        document.getElementById('health-min-seeders').value = j.minSeeders || 2
+                        document.getElementById('health-good-seeders').value = j.goodSeeders || 5
+                        document.getElementById('health-excellent-seeders').value = j.excellentSeeders || 10
+                        (j.arr || []).forEach(addArrRow)
+                    }
+                })
+
+                // Save watcher interval
+                document.getElementById('watch-interval-form-settings').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    let v = parseInt(document.getElementById('watch-interval-settings').value, 10);
+                    if (isNaN(v) || v <= 0) {
+                        Distribyted.message.error('Invalid interval');
+                        return;
+                    }
+                    fetch('/api/watch_interval', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ interval: v })
+                    }).then(r => {
+                        if (r.ok) Distribyted.message.info('Watcher interval updated.'); else r.json().then(j => Distribyted.message.error(j.error))
+                    })
+                })
+
+                // Save limits
+                document.getElementById('limits-form').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    const dl = parseFloat(document.getElementById('dl-mbit').value) || 0
+                    const ul = parseFloat(document.getElementById('ul-mbit').value) || 0
+                    fetch('/api/settings/limits', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ downloadMbit: dl, uploadMbit: ul })
+                    }).then(r => {
+                        if (r.ok) Distribyted.message.info('Limits updated.'); else r.json().then(j => Distribyted.message.error(j.error))
+                    })
+                })
+
+                // Save qBt toggle
+                document.getElementById('qbt-form').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    const enabled = !!document.getElementById('qbt-enabled').checked
+                    fetch('/api/settings/qbt', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled })
+                    }).then(r => {
+                        if (r.ok) Distribyted.message.info('qBittorrent API setting saved.'); else r.json().then(j => Distribyted.message.error(j.error))
+                    })
+                })
+
+                // Save Health
+                // General config: load
+                let gCfg = null;
+                function loadConfig(){
+                    return fetch('/api/settings/config').then(r => r.json()).then(j => { gCfg = j || {}; return gCfg; });
+                }
+                // Initialize general config fields
+                loadConfig().then(function(c){
+                    try{
+                        if(c && c.http){
+                            document.getElementById('http-ip').value = c.http.ip || '';
+                            document.getElementById('http-port').value = c.http.port || '';
+                            document.getElementById('http-httpfs').checked = !!c.http.httpfs;
+                        }
+                        if(c && c.webdav){
+                            document.getElementById('wd-port').value = c.webdav.port || '';
+                            document.getElementById('wd-user').value = c.webdav.user || '';
+                            document.getElementById('wd-pass').value = c.webdav.pass || '';
+                        }
+                        if(c && c.torrent){
+                            document.getElementById('tor-addto').value = c.torrent.add_timeout || c.torrent.addTimeout || '';
+                            document.getElementById('tor-readto').value = c.torrent.read_timeout || c.torrent.readTimeout || '';
+                            document.getElementById('tor-continue').checked = !!(c.torrent.continue_when_add_timeout || c.torrent.continueWhenAddTimeout);
+                            document.getElementById('tor-cache').value = c.torrent.global_cache_size || c.torrent.globalCacheSize || '';
+                            document.getElementById('tor-meta').value = c.torrent.metadata_folder || c.torrent.metadataFolder || '';
+                            document.getElementById('tor-noipv6').checked = !!c.torrent.disable_ipv6 || !!c.torrent.disableIPv6;
+                            document.getElementById('tor-notcp').checked = !!c.torrent.disable_tcp || !!c.torrent.disableTCP;
+                            document.getElementById('tor-noutp').checked = !!c.torrent.disable_utp || !!c.torrent.disableUTP;
+                            document.getElementById('tor-ip').value = c.torrent.ip || '';
+                            document.getElementById('tor-pool').value = c.torrent.reader_pool_size || c.torrent.readerPoolSize || 4;
+                            document.getElementById('tor-port').value = c.torrent.listen_port || c.torrent.listenPort || 0;
+                            document.getElementById('tor-readahead').value = c.torrent.readahead_mb || c.torrent.readaheadMB || 2;
+                            try{
+                                var et = (c.torrent.extra_trackers || c.torrent.extraTrackers || []).join('\n');
+                                document.getElementById('tor-extra-trackers').value = et;
+                                document.getElementById('tor-extra-trackers-url').value = c.torrent.extra_trackers_url || c.torrent.extraTrackersURL || '';
+                            }catch(e){}
+                        }
+                        if(c && c.fuse){
+                            document.getElementById('fuse-allow').checked = !!c.fuse.allow_other || !!c.fuse.allowOther;
+                            document.getElementById('fuse-path').value = c.fuse.path || '';
+                        }
+                        if(c && c.log){
+                            document.getElementById('log-debug').checked = !!c.log.debug;
+                            document.getElementById('log-path').value = c.log.path || '';
+                            document.getElementById('log-backups').value = c.log.max_backups || c.log.maxBackups || '';
+                            document.getElementById('log-size').value = c.log.max_size || c.log.maxSize || '';
+                            document.getElementById('log-age').value = c.log.max_age || c.log.maxAge || '';
+                        }
+                    }catch(e){ /* ignore */ }
+                });
+
+                function postConfig(body){
+                    return fetch('/api/settings/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                        .then(r => { if(!r.ok) return r.json().then(j=>{ throw new Error(j.error || 'error')}); return r.json(); });
+                }
+
+                // Save HTTP
+                document.getElementById('http-form').addEventListener('submit', function(e){
+                    e.preventDefault(); if(!gCfg) return;
+                    const http = Object.assign({}, gCfg.http || {});
+                    http.ip = document.getElementById('http-ip').value.trim();
+                    http.port = parseInt(document.getElementById('http-port').value, 10) || 0;
+                    http.httpfs = !!document.getElementById('http-httpfs').checked;
+                    postConfig({ http: http }).then(_=>{ gCfg.http = http; Distribyted.message.info('HTTP settings saved.');}).catch(err=>Distribyted.message.error(err.message));
+                })
+
+                // Save WebDAV
+                document.getElementById('webdav-form').addEventListener('submit', function(e){
+                    e.preventDefault(); if(!gCfg) return;
+                    const wd = Object.assign({}, gCfg.webdav || {});
+                    wd.port = parseInt(document.getElementById('wd-port').value, 10) || 0;
+                    wd.user = document.getElementById('wd-user').value.trim();
+                    wd.pass = document.getElementById('wd-pass').value.trim();
+                    postConfig({ webdav: wd }).then(_=>{ gCfg.webdav = wd; Distribyted.message.info('WebDAV settings saved.');}).catch(err=>Distribyted.message.error(err.message));
+                })
+
+                // Save Torrent advanced
+                document.getElementById('torrent-form').addEventListener('submit', function(e){
+                    e.preventDefault(); if(!gCfg) return;
+                    const tor = Object.assign({}, gCfg.torrent || {});
+                    tor.addTimeout = parseInt(document.getElementById('tor-addto').value, 10) || 0;
+                    tor.readTimeout = parseInt(document.getElementById('tor-readto').value, 10) || 0;
+                    tor.continueWhenAddTimeout = !!document.getElementById('tor-continue').checked;
+                    tor.globalCacheSize = parseInt(document.getElementById('tor-cache').value, 10) || 0;
+                    tor.metadataFolder = document.getElementById('tor-meta').value.trim();
+                    tor.disableIPv6 = !!document.getElementById('tor-noipv6').checked;
+                    tor.disableTCP = !!document.getElementById('tor-notcp').checked;
+                    tor.disableUTP = !!document.getElementById('tor-noutp').checked;
+                    tor.ip = document.getElementById('tor-ip').value.trim();
+                    tor.readerPoolSize = parseInt(document.getElementById('tor-pool').value, 10) || 1;
+                    tor.listenPort = parseInt(document.getElementById('tor-port').value, 10) || 0;
+                    tor.readaheadMB = parseInt(document.getElementById('tor-readahead').value, 10) || 0;
+                    var etxt = (document.getElementById('tor-extra-trackers').value || '').split(/\r?\n/).map(function(s){return s.trim();}).filter(Boolean);
+                    tor.extraTrackers = etxt;
+                    tor.extraTrackersURL = (document.getElementById('tor-extra-trackers-url').value || '').trim();
+                    postConfig({ torrent: tor }).then(_=>{ gCfg.torrent = tor; Distribyted.message.info('Torrent settings saved.');}).catch(err=>Distribyted.message.error(err.message));
+                })
+
+                // Save FUSE
+                document.getElementById('fuse-form').addEventListener('submit', function(e){
+                    e.preventDefault(); if(!gCfg) return;
+                    const fu = Object.assign({}, gCfg.fuse || {});
+                    fu.allowOther = !!document.getElementById('fuse-allow').checked;
+                    fu.path = document.getElementById('fuse-path').value.trim();
+                    postConfig({ fuse: fu }).then(_=>{ gCfg.fuse = fu; Distribyted.message.info('FUSE settings saved.');}).catch(err=>Distribyted.message.error(err.message));
+                })
+
+                // Save Log
+                document.getElementById('log-form').addEventListener('submit', function(e){
+                    e.preventDefault(); if(!gCfg) return;
+                    const lg = Object.assign({}, gCfg.log || {});
+                    lg.debug = !!document.getElementById('log-debug').checked;
+                    lg.path = document.getElementById('log-path').value.trim();
+                    lg.maxBackups = parseInt(document.getElementById('log-backups').value, 10) || 0;
+                    lg.maxSize = parseInt(document.getElementById('log-size').value, 10) || 0;
+                    lg.maxAge = parseInt(document.getElementById('log-age').value, 10) || 0;
+                    postConfig({ log: lg }).then(_=>{ gCfg.log = lg; Distribyted.message.info('Log settings saved.');}).catch(err=>Distribyted.message.error(err.message));
+                })
+                document.getElementById('health-form').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    const arr = collectArrRows();
+                    const body = {
+                        enabled: !!document.getElementById('health-enabled').checked,
+                        intervalMinutes: parseInt(document.getElementById('health-interval').value, 10) || 60,
+                        graceMinutes: parseInt(document.getElementById('health-grace').value, 10) || 30,
+                        minSeeders: parseInt(document.getElementById('health-min-seeders').value, 10) || 0,
+                        goodSeeders: parseInt(document.getElementById('health-good-seeders').value, 10) || 0,
+                        excellentSeeders: parseInt(document.getElementById('health-excellent-seeders').value, 10) || 0,
+                        arr: arr,
+                    }
+                    if (body.intervalMinutes < 60) { Distribyted.message.error('Minimum interval is 60 minutes'); return }
+                    fetch('/api/settings/health', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+                    }).then(r => {
+                        if (r.ok) Distribyted.message.info('Health settings saved.'); else r.json().then(j => Distribyted.message.error(j.error))
+                    })
+                })
+
+                // Arr list management
+                function addArrRow(item){
+                    const wrap = document.getElementById('arr-list');
+                    const row = document.createElement('div');
+                    row.className = 'form-inline mb-2';
+                    row.innerHTML = '<select class="form-control mr-2 arr-type">\
+                        <option value="radarr">Radarr</option>\
+                        <option value="sonarr">Sonarr</option>\
+                        <option value="lidarr">Lidarr</option></select>\
+                        <input type="text" class="form-control mr-2 arr-name" placeholder="Name" style="min-width:140px">\
+                        <input type="text" class="form-control mr-2 arr-url" placeholder="Base URL (e.g. http://127.0.0.1:7878)" style="min-width:320px">\
+                        <input type="password" class="form-control mr-2 arr-key" placeholder="API Key" style="min-width:280px">\
+                        <label class="mr-1">Insecure</label><input type="checkbox" class="form-control mr-2 arr-insecure">\
+                        <button type="button" class="btn btn-sm btn-info mr-2 arr-test">Test</button>\
+                        <button type="button" class="btn btn-sm btn-danger arr-del">Delete</button>';
+                    if(item){
+                        row.querySelector('.arr-type').value = item.type || 'radarr';
+                        row.querySelector('.arr-name').value = item.name || '';
+                        row.querySelector('.arr-url').value = item.base_url || item.baseUrl || '';
+                        row.querySelector('.arr-key').value = item.api_key || item.apiKey || '';
+                        row.querySelector('.arr-insecure').checked = !!item.insecure;
+                    }
+                    row.querySelector('.arr-del').addEventListener('click', function(){ row.remove(); });
+                    row.querySelector('.arr-test').addEventListener('click', function(){
+                        const type = row.querySelector('.arr-type').value;
+                        const name = row.querySelector('.arr-name').value.trim();
+                        const baseUrl = row.querySelector('.arr-url').value.trim();
+                        const apiKey = row.querySelector('.arr-key').value.trim();
+                        const insecure = !!row.querySelector('.arr-insecure').checked;
+                        if(!baseUrl || !apiKey){ Distribyted.message.error('Base URL and API Key required'); return; }
+						fetch('/api/settings/health/arr/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, name, base_url: baseUrl, api_key: apiKey, insecure }) })
+                          .then(r => r.json().then(j => ({ ok: r.ok, body: j })))
+						  .then(res => {
+							if(res.ok){
+								Distribyted.message.info('Connection OK');
+								if(confirm('Save this Arr instance now?')){
+									// Save full current form state to avoid drift
+									try{
+										// Ensure this row is included in arr collection
+										var arr = collectArrRows();
+										var found = arr.find(function(it){ return it.base_url===baseUrl && it.type===type; });
+										var inst = { type: type, name: name, base_url: baseUrl, api_key: apiKey, insecure: insecure };
+										if(!found){ arr.push(inst); }
+										var body = {
+											enabled: !!document.getElementById('health-enabled').checked,
+											intervalMinutes: parseInt(document.getElementById('health-interval').value, 10) || 60,
+											graceMinutes: parseInt(document.getElementById('health-grace').value, 10) || 30,
+											minSeeders: parseInt(document.getElementById('health-min-seeders').value, 10) || 0,
+											goodSeeders: parseInt(document.getElementById('health-good-seeders').value, 10) || 0,
+											excellentSeeders: parseInt(document.getElementById('health-excellent-seeders').value, 10) || 0,
+											arr: arr
+										};
+										fetch('/api/settings/health', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+											.then(function(r){ if(r.ok){ Distribyted.message.info('Arr saved.'); } else { return r.json().then(j=>{ throw new Error(j.error||'save failed')}); } })
+											.catch(function(e){ Distribyted.message.error(e.message||'Save failed'); });
+									}catch(e){ Distribyted.message.error(e.message||'Save failed'); }
+								}
+							}else{
+								Distribyted.message.error(res.body.error || 'Connection failed');
+							}
+						  })
+                          .catch(_=>Distribyted.message.error('Request failed'))
+                    });
+                    wrap.appendChild(row);
+                }
+                function collectArrRows(){
+                    const out = [];
+                    document.querySelectorAll('#arr-list .form-inline').forEach(function(row){
+                        const type = row.querySelector('.arr-type').value;
+                        const name = row.querySelector('.arr-name').value.trim();
+                        const baseUrl = row.querySelector('.arr-url').value.trim();
+                        const apiKey = row.querySelector('.arr-key').value.trim();
+                        const insecure = !!row.querySelector('.arr-insecure').checked;
+                        if(baseUrl && apiKey){ out.push({ type: type, name: name, base_url: baseUrl, api_key: apiKey, insecure: insecure }); }
+                    })
+                    return out;
+                }
+                document.getElementById('arr-add').addEventListener('click', function(){ addArrRow(); })
+            </script>
+        </div>
+    </div>
+</body>
+
+</html>
+

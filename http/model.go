@@ -7,3 +7,7 @@ type RouteAdd struct {
 type Error struct {
 	Error string `json:"error"`
 }
+
+type RouteCreate struct {
+	Name string `json:"name" binding:"required"`
+}

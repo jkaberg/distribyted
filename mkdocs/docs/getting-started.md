@@ -79,9 +79,6 @@ Here there is a list of all available routes with their torrents and some info. 
 
 ![routes screen](images/distribyted-routes-border-large.png)
 
-### Servers
-
-Servers is a way to generate magnet files from folders. 
 All servers configured using the config yaml file will be here. 
 When some data is changed on these folders, a new magnet URI will be generated. 
 You can share that magnet URI with anyone to share these files.

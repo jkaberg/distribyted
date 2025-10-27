@@ -78,6 +78,19 @@ func (s *storage) AddFS(fs Filesystem, p string) error {
 	return s.createParent(p, &Dir{})
 }
 
+// RemoveFS removes a mounted filesystem and its directory entry from the
+// container. It is safe to call even if the mount doesn't exist.
+func (s *storage) RemoveFS(p string) error {
+	p = clean(p)
+	delete(s.filesystems, p)
+	base, filename := path.Split(p)
+	base = clean(base)
+	if ch, ok := s.children[base]; ok {
+		delete(ch, filename)
+	}
+	return nil
+}
+
 func (s *storage) Add(f File, p string) error {
 	p = clean(p)
 	if s.Has(p) {
@@ -119,9 +132,32 @@ func (s *storage) createParent(p string, f File) error {
 
 	if filename != "" {
 		s.children[base][filename] = f
+
+		// Propagate leaf file size to ancestor directories
+		if !f.IsDir() {
+			s.addSizeToAncestors(base, f.Size())
+		}
 	}
 
 	return nil
+}
+
+// addSizeToAncestors increments the size of the directory at start and all of its
+// ancestor directories (up to and including "/") by size.
+func (s *storage) addSizeToAncestors(start string, size int64) {
+	cur := clean(start)
+	for {
+		if file, ok := s.files[cur]; ok {
+			if dir, ok := file.(*Dir); ok {
+				dir.size += size
+			}
+		}
+		if cur == "/" {
+			break
+		}
+		parent, _ := path.Split(cur)
+		cur = clean(parent)
+	}
 }
 
 func (s *storage) Children(path string) (map[string]File, error) {

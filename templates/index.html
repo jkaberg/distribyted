@@ -17,6 +17,23 @@
           <button id="sidebar-toggler" class="sidebar-toggle">
             <span class="sr-only">Toggle navigation</span>
           </button>
+          <div class="ml-auto" style="display:flex; align-items:center; gap:16px;">
+            <div id="topbar-stats" style="display:flex; align-items:center; gap:16px;">
+              <div id="tb-cache-wrap" style="width:40px; height:40px;">
+                <canvas id="tb-cache"></canvas>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="text-muted" style="font-size:12px;">DL</span>
+                <span id="tb-dl" style="font-weight:500;">...</span>
+                <span class="text-muted" style="font-size:12px;">UL</span>
+                <span id="tb-ul" style="font-weight:500;">...</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span id="tb-ip" class="text-muted" style="font-size:12px;">IP: ...</span>
+                <span id="tb-conn" class="badge badge-secondary">...</span>
+              </div>
+            </div>
+          </div>
         </nav>
       </header>
 

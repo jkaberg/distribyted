@@ -3,6 +3,7 @@ package fs
 import (
 	"context"
 	"io"
+	"path"
 	"sync"
 	"time"
 
@@ -19,6 +20,8 @@ type Torrent struct {
 	s           *storage
 	loaded      bool
 	readTimeout int
+	poolSize    int
+	readahead   int64
 }
 
 func NewTorrent(readTimeout int) *Torrent {
@@ -26,7 +29,27 @@ func NewTorrent(readTimeout int) *Torrent {
 		s:           newStorage(SupportedFactories),
 		ts:          make(map[string]*torrent.Torrent),
 		readTimeout: readTimeout,
+		poolSize:    4,
+		readahead:   2 * 1024 * 1024,
 	}
+}
+
+func (fs *Torrent) SetReaderPoolSize(n int) {
+	if n <= 0 {
+		n = 1
+	}
+	fs.mu.Lock()
+	fs.poolSize = n
+	fs.mu.Unlock()
+}
+
+func (fs *Torrent) SetReadaheadBytes(b int64) {
+	if b < 0 {
+		b = 0
+	}
+	fs.mu.Lock()
+	fs.readahead = b
+	fs.mu.Unlock()
 }
 
 func (fs *Torrent) AddTorrent(t *torrent.Torrent) {
@@ -56,12 +79,28 @@ func (fs *Torrent) load() {
 
 	for _, t := range fs.ts {
 		<-t.GotInfo()
-		for _, file := range t.Files() {
+
+		files := t.Files()
+		wrapInRoot := len(files) == 1
+		rootName := ""
+		if wrapInRoot {
+			rootName = t.Info().Name
+		}
+
+		for _, file := range files {
 			fs.s.Add(&torrentFile{
-				readerFunc: file.NewReader,
-				len:        file.Length(),
-				timeout:    fs.readTimeout,
-			}, file.Path())
+				readerFunc:     file.NewReader,
+				len:            file.Length(),
+				timeout:        fs.readTimeout,
+				poolTarget:     fs.poolSize,
+				readaheadBytes: fs.readahead,
+			}, func() string {
+				p := file.Path()
+				if wrapInRoot {
+					return path.Join(rootName, p)
+				}
+				return p
+			}())
 		}
 	}
 
@@ -146,8 +185,14 @@ var _ File = &torrentFile{}
 type torrentFile struct {
 	readerFunc func() torrent.Reader
 	reader     reader
+	pool       chan reader
+	poolInit   sync.Once
+	poolAll    []reader
+	poolTarget int
 	len        int64
 	timeout    int
+	// readahead
+	readaheadBytes int64
 }
 
 func (d *torrentFile) load() {
@@ -155,6 +200,23 @@ func (d *torrentFile) load() {
 		return
 	}
 	d.reader = newReadAtWrapper(d.readerFunc(), d.timeout)
+	// initialize pool lazily
+	d.poolInit.Do(func() {
+		size := d.poolTarget
+		if size <= 0 {
+			size = 4
+		}
+		d.pool = make(chan reader, size)
+		for i := 0; i < size; i++ {
+			pr := newReadAtWrapper(d.readerFunc(), d.timeout)
+			d.poolAll = append(d.poolAll, pr)
+			d.pool <- pr
+		}
+		// default if not set
+		if d.readaheadBytes == 0 {
+			d.readaheadBytes = 2 * 1024 * 1024
+		}
+	})
 }
 
 func (d *torrentFile) Size() int64 {
@@ -173,6 +235,13 @@ func (d *torrentFile) Close() error {
 
 	d.reader = nil
 
+	// close pooled readers
+	for _, r := range d.poolAll {
+		_ = r.Close()
+	}
+	d.poolAll = nil
+	d.pool = nil
+
 	return err
 }
 
@@ -187,11 +256,62 @@ func (d *torrentFile) Read(p []byte) (n int, err error) {
 	)
 
 	defer timer.Stop()
-
-	return d.reader.ReadContext(ctx, p)
+	n, err = d.reader.ReadContext(ctx, p)
+	if n > 0 && err == nil {
+		d.prefetch(int64(n))
+	}
+	return n, err
 }
 
 func (d *torrentFile) ReadAt(p []byte, off int64) (n int, err error) {
 	d.load()
-	return d.reader.ReadAt(p, off)
+	// Use pooled readers to allow concurrent ReadAt calls
+	if d.pool != nil {
+		r := <-d.pool
+		// Ensure reader is returned to pool
+		defer func() { d.pool <- r }()
+		n, err = r.ReadAt(p, off)
+		if n > 0 && err == nil {
+			d.prefetchAt(off + int64(n))
+		}
+		return n, err
+	}
+	n, err = d.reader.ReadAt(p, off)
+	if n > 0 && err == nil {
+		d.prefetchAt(off + int64(n))
+	}
+	return n, err
+}
+
+// prefetch issues an asynchronous read of the next window after current sequential read.
+func (d *torrentFile) prefetch(bytesRead int64) {
+	// Estimate the next offset as current position; we don't have explicit pos here,
+	// so only use ReadAt-based prefetch which passes explicit offsets.
+}
+
+func (d *torrentFile) prefetchAt(nextOff int64) {
+	if d.readaheadBytes <= 0 || d.pool == nil {
+		return
+	}
+	// pull a reader without blocking the foreground if none available
+	select {
+	case r := <-d.pool:
+		go func(rd reader) {
+			defer func() { d.pool <- rd }()
+			bufSize := int(d.readaheadBytes)
+			if nextOff >= d.len {
+				return
+			}
+			if remain := d.len - nextOff; remain < int64(bufSize) {
+				bufSize = int(remain)
+			}
+			if bufSize <= 0 {
+				return
+			}
+			buf := make([]byte, bufSize)
+			_, _ = rd.ReadAt(buf, nextOff)
+		}(r)
+	default:
+		// no spare reader; skip prefetch
+	}
 }

@@ -1,0 +1,107 @@
+services:
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./config/prowlarr:/config
+    ports:
+      - "9696:9696"
+    networks:
+      - media
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./config/sonarr:/config
+      - ./data/distribyted:/data:rshared
+    ports:
+      - "8989:8989"
+    networks:
+      - media
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./config/radarr:/config
+      - ./data/distribyted:/data:rshared
+    ports:
+      - "7878:7878"
+    networks:
+      - media
+    restart: unless-stopped
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./config/jellyfin:/config
+      - ./data/distribyted:/data:rshared
+    ports:
+      - "8096:8096"
+    networks:
+      - media
+    restart: unless-stopped
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+    ports:
+      - "8191:8191"
+    networks:
+      - media
+    restart: unless-stopped
+
+  distribyted:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: distribyted
+    environment:
+      - DISTRIBYTED_HTTP_PORT=4444
+      - DISTRIBYTED_WEBDAV_PORT=36911
+      - DISTRIBYTED_CONFIG=/config/config.yaml
+      - DISTRIBYTED_FUSE_ALLOW_OTHER=true
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./config/distribyted:/config
+      - ./data/distribyted:/data:rshared
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    ports:
+      - "4444:4444"
+      - "36911:36911"
+    networks:
+      - media
+    restart: unless-stopped
+
+networks:
+  media:
+    name: media
+

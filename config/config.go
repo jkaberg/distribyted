@@ -9,18 +9,18 @@ const (
 )
 
 const (
-	metadataFolder = "./distribyted-data/metadata"
-	mountFolder    = "./distribyted-data/mount"
-	logsFolder     = "./distribyted-data/logs"
-	serverFolder   = "./distribyted-data/served-folders/server"
+	metadataFolder = "/data/metadata"
+	mountFolder    = "/data/mount"
+	logsFolder     = "/data/logs"
 )
 
 func DefaultConfig() *Root {
 	return &Root{
 		HTTPGlobal: &HTTPGlobal{
-			Port:   4444,
-			IP:     "0.0.0.0",
-			HTTPFS: true,
+			Port:           4444,
+			IP:             "0.0.0.0",
+			HTTPFS:         true,
+			QbittorrentAPI: false,
 		},
 		WebDAV: &WebDAVGlobal{
 			Port: 36911,
@@ -62,21 +62,6 @@ func DefaultConfig() *Root {
 					{
 						MagnetURI: m5,
 					},
-				},
-			},
-		},
-
-		Servers: []*Server{
-			{
-				Name: "server",
-				Path: serverFolder,
-				Trackers: []string{
-					"wss://tracker.btorrent.xyz",
-					"wss://tracker.openwebtorrent.com",
-					"http://p4p.arenabg.com:1337/announce",
-					"udp://tracker.opentrackr.org:1337/announce",
-					"udp://open.tracker.cl:1337/announce",
-					"http://openbittorrent.com:80/announce",
 				},
 			},
 		},

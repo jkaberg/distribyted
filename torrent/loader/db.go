@@ -69,14 +69,14 @@ func (l *DB) RemoveFromHash(r, h string) (bool, error) {
 	}
 
 	rp := path.Join(routeRootKey, h, r)
-	if _, err := tx.Get([]byte(rp)); err != nil {
-		return false, nil
+	err := tx.Delete([]byte(rp))
+	if err == badger.ErrKeyNotFound {
+		// treat as deleted so UI doesn't get stuck
+		return true, tx.Commit()
 	}
-
-	if err := tx.Delete([]byte(rp)); err != nil {
+	if err != nil {
 		return false, err
 	}
-
 	return true, tx.Commit()
 }
 

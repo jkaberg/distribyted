@@ -1,6 +1,8 @@
 package log
 
 import (
+	"strings"
+
 	"github.com/anacrolix/log"
 	"github.com/rs/zerolog"
 )
@@ -12,6 +14,15 @@ type Torrent struct {
 }
 
 func (l *Torrent) Handle(r log.Record) {
+	// Downgrade noisy WebRTC tracker state transitions that spam logs under normal operation.
+	if strings.Contains(r.Text(), "webrtc PeerConnection state changed to closed") ||
+		strings.Contains(r.Text(), "webrtc PeerConnection state changed to connecting") ||
+		strings.Contains(r.Text(), "webrtc PeerConnection state changed to failed") ||
+		strings.Contains(r.Text(), "unhandled announce response") {
+		l.L.Debug().Msgf(r.Text())
+		return
+	}
+
 	e := l.L.Info()
 	switch r.Level {
 	case log.Debug:

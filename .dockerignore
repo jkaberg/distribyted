@@ -1,0 +1,9 @@
+.git
+.distribyted-data
+bin
+build
+out
+dist
+*.log
+node_modules
+testing

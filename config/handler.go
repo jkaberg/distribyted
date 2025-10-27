@@ -68,3 +68,15 @@ func (c *Handler) Get() (*Root, error) {
 
 	return conf, nil
 }
+
+// Save writes the provided config back to disk
+func (c *Handler) Save(r *Root) error {
+	b, err := yaml.Marshal(r)
+	if err != nil {
+		return fmt.Errorf("error marshaling configuration file: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(c.p), 0744); err != nil {
+		return fmt.Errorf("error creating path for configuration file: %s, %w", c.p, err)
+	}
+	return ioutil.WriteFile(c.p, b, 0644)
+}
