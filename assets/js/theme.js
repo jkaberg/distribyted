@@ -33,16 +33,9 @@ Distribyted.theme = (function(){
   function applyTheme(theme){
     var isDark = theme === 'dark';
     var html = document.documentElement;
-    if(isDark){ html.classList.add('theme-dark'); html.setAttribute('data-theme','dark'); }
-    else{ html.classList.remove('theme-dark'); html.setAttribute('data-theme','light'); }
-    // If body exists, also toggle header class
-    var body = document.body;
-    if(body){
-      try{
-        body.classList.remove(isDark ? 'header-light' : 'header-dark');
-        body.classList.add(isDark ? 'header-dark' : 'header-light');
-      }catch(e){}
-    }
+    if(isDark){ html.setAttribute('data-bs-theme','dark'); }
+    else{ html.setAttribute('data-bs-theme','light'); }
+    // No custom header/body classes; rely on Bootstrap
   }
 
   function setTheme(theme){
@@ -63,7 +56,7 @@ Distribyted.theme = (function(){
       if(document.getElementById('theme-toggle-btn')) return;
       var btn = document.createElement('button');
       btn.id = 'theme-toggle-btn';
-      btn.className = 'btn btn-sm btn-outline-secondary';
+      btn.className = 'btn btn-outline-secondary';
       btn.style.display = 'inline-flex';
       btn.style.alignItems = 'center';
       btn.style.justifyContent = 'center';
@@ -73,7 +66,7 @@ Distribyted.theme = (function(){
       btn.style.padding = '0';
       btn.style.lineHeight = '1';
       btn.title = 'Toggle dark theme';
-      btn.innerHTML = '<i class="mdi mdi-weather-night"></i>';
+      btn.innerHTML = '<i class="bi bi-moon"></i>';
       btn.addEventListener('click', function(e){ e.preventDefault(); toggle(); });
       wrap.appendChild(btn);
       updateToggleIcon(getStoredTheme());
@@ -85,7 +78,7 @@ Distribyted.theme = (function(){
       var btn = document.getElementById('theme-toggle-btn');
       if(!btn) return;
       var isDark = theme === 'dark';
-      btn.innerHTML = isDark ? '<i class="mdi mdi-white-balance-sunny"></i>' : '<i class="mdi mdi-weather-night"></i>';
+      btn.innerHTML = isDark ? '<i class="bi bi-sun"></i>' : '<i class="bi bi-moon"></i>';
       btn.title = isDark ? 'Switch to light theme' : 'Switch to dark theme';
     }catch(e){}
   }

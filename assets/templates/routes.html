@@ -5,12 +5,16 @@
                 <h2>Routes</h2>
             </div>
             <div class="card-body pt-0 pb-3">
-                <form id="create-route-form" class="form-inline">
-                    <div class="form-group">
-                        <label class="mr-2">New route name</label>
-                        <input type="text" id="new-route-name" class="form-control mr-2" placeholder="e.g. multimedia">
+                <form id="create-route-form" class="row gy-2 gx-2 align-items-center">
+                    <div class="col-auto">
+                        <label class="col-form-label">New route name</label>
                     </div>
-                    <button type="submit" class="btn btn-success btn-default">Create</button>
+                    <div class="col-auto">
+                        <input type="text" id="new-route-name" class="form-control" placeholder="e.g. multimedia">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-success">Create</button>
+                    </div>
                 </form>
             </div>
         </div>
@@ -25,9 +29,9 @@
                 <h2 title="{{folder}}">Route: {{name}} (<span id="total-{{name}}">{{total}}</span> torrents)</h2>
                 <div class="d-flex align-items-center">
                     <input type="file" accept=".torrent" id='file-{{name}}' style="display:none" onchange='Distribyted.routes.onFileSelected(event, "{{name}}")'>
-                    <button type="button" class="btn btn-sm btn-primary btn-default mr-2" onclick='Distribyted.routes.triggerFileDialog("{{name}}")'>Upload .torrent</button>
-                    <button type="button" class="btn btn-sm btn-secondary btn-default mr-2" onclick='Distribyted.routes.addMagnet("{{name}}")'>Add magnet</button>
-                    <button class="btn btn-sm btn-danger" onclick='Distribyted.routes.deleteRoute("{{name}}")'>Delete route</button>
+                    <button type="button" class="btn btn-primary me-2" onclick='Distribyted.routes.triggerFileDialog("{{name}}")'>Upload .torrent</button>
+                    <button type="button" class="btn btn-secondary me-2" onclick='Distribyted.routes.addMagnet("{{name}}")'>Add magnet</button>
+                    <button class="btn btn-danger" onclick='Distribyted.routes.deleteRoute("{{name}}")'>Delete route</button>
                 </div>
             </div>
             <div class="card-body pt-0 pb-2">
@@ -35,7 +39,7 @@
                     <thead>
                         <tr>
                             <th style="width: 30%">Name</th>
-                            <th style="width: 15%"><i class="mdi mdi-arrow-down"></i> / <i class="mdi mdi-arrow-up"></i>
+                            <th style="width: 15%"><i class="bi bi-arrow-down"></i> / <i class="bi bi-arrow-up"></i>
                             </th>
                             <th style="width: 10%" class="d-none d-lg-table-cell">Size</th>
                             <th style="width: 15%" class="d-none d-lg-table-cell">Health</th>
@@ -46,9 +50,9 @@
                     <tbody id="tbody-{{name}}"></tbody>
                     <tfoot id="pager-{{name}}" style="display:none">
                         <tr>
-                            <td colspan="5" class="text-right">
+                            <td colspan="5" class="text-end">
                                 <nav aria-label="pagination">
-                                    <ul id="pagination-{{name}}" class="pagination pagination-sm mb-0 justify-content-end"></ul>
+                                    <ul id="pagination-{{name}}" class="pagination mb-0 justify-content-end"></ul>
                                 </nav>
                             </td>
                         </tr>

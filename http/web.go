@@ -19,10 +19,6 @@ var indexHandler = func(ss *torrent.Stats) gin.HandlerFunc {
 	}
 }
 
-var dashboardHandler = func(c *gin.Context) {
-	c.HTML(http.StatusOK, "index.html", nil)
-}
-
 var logsHandler = func(c *gin.Context) {
 	c.HTML(http.StatusOK, "logs.html", nil)
 }

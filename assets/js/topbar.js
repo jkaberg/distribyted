@@ -30,8 +30,8 @@ Distribyted.topbar = (function(){
         }catch(e){}
     }
     function tick(){
-        fetch('/api/status').then(function(r){ if(r.ok) return r.json();}).then(function(j){ if(j){ updateSpeeds(j); updateCache(j);} });
-        fetch('/api/net').then(function(r){ if(r.ok) return r.json();}).then(function(j){ if(j){ updateNet(j);} });
+        Distribyted.http.getJSON('/api/status').then(function(j){ if(j){ updateSpeeds(j); updateCache(j);} });
+        Distribyted.http.getJSON('/api/net').then(function(j){ if(j){ updateNet(j);} });
     }
     function start(){ tick(); setInterval(tick, 2000); }
     return { start: start };

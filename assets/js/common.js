@@ -10,167 +10,75 @@ var Distribyted = Distribyted || {};
 
 Distribyted.message = {
 
-    _toastr: function () {
-        toastr.options = {
-            closeButton: true,
-            debug: false,
-            newestOnTop: false,
-            progressBar: true,
-            positionClass: "toast-top-right",
-            preventDuplicates: false,
-            onclick: null,
-            showDuration: "300",
-            hideDuration: "1000",
-            timeOut: "5000",
-            extendedTimeOut: "1000",
-            showEasing: "swing",
-            hideEasing: "linear",
-            showMethod: "fadeIn",
-            hideMethod: "fadeOut"
-        };
-
-        return toastr;
+    _toast: function(type, message){
+        try{
+            var wrap = document.getElementById('toast-wrap');
+            if(!wrap){
+                wrap = document.createElement('div');
+                wrap.id = 'toast-wrap';
+                wrap.className = 'toast-container position-fixed top-0 end-0 p-3';
+                document.body.appendChild(wrap);
+            }
+            var el = document.createElement('div');
+            el.className = 'toast align-items-center text-bg-' + (type==='error'?'danger':'info') + ' border-0';
+            el.setAttribute('role','alert');
+            el.setAttribute('aria-live','assertive');
+            el.setAttribute('aria-atomic','true');
+            el.innerHTML = '<div class="d-flex"><div class="toast-body">'+ String(message||'') +'</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>';
+            wrap.appendChild(el);
+            var t = new bootstrap.Toast(el, { delay: 5000 });
+            t.show();
+        }catch(e){ alert(String(message||'')); }
     },
 
+    error: function (message) { this._toast('error', message); },
+    info: function (message) { this._toast('info', message); }
+}
 
-    error: function (message) {
-        this._toastr().error(message);
+// Lightweight jQuery-based HTTP helpers for consistent AJAX usage
+Distribyted.http = {
+    getJSON: function (url) {
+        return $.ajax({ url: url, method: 'GET', dataType: 'json' });
     },
-
-    info: function (message) {
-        this._toastr().info(message);
+    postJSON: function (url, body) {
+        return $.ajax({ url: url, method: 'POST', contentType: 'application/json', data: JSON.stringify(body || {}), dataType: 'json' });
+    },
+    delete: function (url) {
+        return $.ajax({ url: url, method: 'DELETE' });
+    },
+    upload: function (url, formData) {
+        return $.ajax({ url: url, method: 'POST', data: formData, processData: false, contentType: false });
     }
 }
 
 $(document).ready(function () {
     "use strict";
-
-    /*======== 1. SCROLLBAR SIDEBAR ========*/
-    var sidebarScrollbar = $(".sidebar-scrollbar");
-    if (sidebarScrollbar.length != 0) {
-        sidebarScrollbar.slimScroll({
-            opacity: 0,
-            height: "100%",
-            color: "#808080",
-            size: "5px",
-            touchScrollStep: 50
-        })
-            .mouseover(function () {
-                $(this)
-                    .next(".slimScrollBar")
-                    .css("opacity", 0.5);
+    // Highlight active nav links (both fixed sidebar and offcanvas)
+    try{
+        function normalizePath(p){ if(!p) return '/'; if(p.length>1 && p.endsWith('/')) return p.slice(0,-1); return p; }
+        var currentPath = normalizePath(location.pathname||'/');
+        var menus = [ document.getElementById('sidebar-menu'), document.getElementById('sidebar-menu-offcanvas') ];
+        menus.forEach(function(menu){
+            if(!menu) return;
+            // Clear current
+            var links = menu.querySelectorAll('a.nav-link');
+            Array.prototype.forEach.call(links, function(a){ a.classList.remove('active'); });
+            // Find best match by pathname (ignore hash)
+            Array.prototype.forEach.call(links, function(a){
+                try{
+                    var url = new URL(a.getAttribute('href'), location.origin);
+                    var linkPath = normalizePath(url.pathname);
+                    if(currentPath === linkPath || (currentPath.startsWith('/settings') && linkPath === '/settings')){
+                        a.classList.add('active');
+                    }
+                }catch(e){}
             });
-    }
-
-    /*======== 2. MOBILE OVERLAY ========*/
-    if ($(window).width() < 768) {
-        $(".sidebar-toggle").on("click", function () {
-            $("body").css("overflow", "hidden");
-            $('body').prepend('<div class="mobile-sticky-body-overlay"></div>')
         });
-
-        $(document).on("click", '.mobile-sticky-body-overlay', function (e) {
-            $(this).remove();
-            $("#body").removeClass("sidebar-mobile-in").addClass("sidebar-mobile-out");
-            $("body").css("overflow", "auto");
-        });
-    }
-
-    /*======== 3. SIDEBAR MENU ========*/
-    var sidebar = $(".sidebar")
-    if (sidebar.length != 0) {
-        $(".sidebar .nav > .has-sub > a").click(function () {
-            $(this).parent().siblings().removeClass('expand')
-            $(this).parent().toggleClass('expand')
-        })
-
-        $(".sidebar .nav > .has-sub .has-sub > a").click(function () {
-            $(this).parent().toggleClass('expand')
-        })
-    }
-
-
-    /*======== 4. SIDEBAR TOGGLE FOR MOBILE ========*/
-    if ($(window).width() < 768) {
-        $(document).on("click", ".sidebar-toggle", function (e) {
-            e.preventDefault();
-            var min = "sidebar-mobile-in",
-                min_out = "sidebar-mobile-out",
-                body = "#body";
-            $(body).hasClass(min)
-                ? $(body)
-                    .removeClass(min)
-                    .addClass(min_out)
-                : $(body)
-                    .addClass(min)
-                    .removeClass(min_out)
-        });
-    }
-
-    /*======== 5. SIDEBAR TOGGLE FOR VARIOUS SIDEBAR LAYOUT ========*/
-    var body = $("#body");
-    if ($(window).width() >= 768) {
-
-        if (typeof window.isMinified === "undefined") {
-            window.isMinified = false;
-        }
-        if (typeof window.isCollapsed === "undefined") {
-            window.isCollapsed = false;
-        }
-
-        $("#sidebar-toggler").on("click", function () {
-            if (
-                body.hasClass("sidebar-fixed-offcanvas") ||
-                body.hasClass("sidebar-static-offcanvas")
-            ) {
-                $(this)
-                    .addClass("sidebar-offcanvas-toggle")
-                    .removeClass("sidebar-toggle");
-                if (window.isCollapsed === false) {
-                    body.addClass("sidebar-collapse");
-                    window.isCollapsed = true;
-                    window.isMinified = false;
-                } else {
-                    body.removeClass("sidebar-collapse");
-                    body.addClass("sidebar-collapse-out");
-                    setTimeout(function () {
-                        body.removeClass("sidebar-collapse-out");
-                    }, 300);
-                    window.isCollapsed = false;
-                }
-            }
-
-            if (
-                body.hasClass("sidebar-fixed") ||
-                body.hasClass("sidebar-static")
-            ) {
-                $(this)
-                    .addClass("sidebar-toggle")
-                    .removeClass("sidebar-offcanvas-toggle");
-                if (window.isMinified === false) {
-                    body
-                        .removeClass("sidebar-collapse sidebar-minified-out")
-                        .addClass("sidebar-minified");
-                    window.isMinified = true;
-                    window.isCollapsed = false;
-                } else {
-                    body.removeClass("sidebar-minified");
-                    body.addClass("sidebar-minified-out");
-                    window.isMinified = false;
-                }
-            }
-        });
-    }
-
-    if ($(window).width() >= 768 && $(window).width() < 992) {
-        if (
-            body.hasClass("sidebar-fixed") ||
-            body.hasClass("sidebar-static")
-        ) {
-            body
-                .removeClass("sidebar-collapse sidebar-minified-out")
-                .addClass("sidebar-minified");
-            window.isMinified = true;
-        }
-    }
+        // Highlight settings subsection by hash (both in fixed and offcanvas)
+        var hash = (location.hash||'').replace('#','') || 'general';
+        var sublinks = document.querySelectorAll('a[data-settings-section]');
+        Array.prototype.forEach.call(sublinks, function(a){ a.classList.remove('active'); });
+        var activeSubs = document.querySelectorAll('a[data-settings-section="'+hash+'"]');
+        Array.prototype.forEach.call(activeSubs, function(a){ a.classList.add('active'); });
+    }catch(e){}
 });

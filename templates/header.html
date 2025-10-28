@@ -6,18 +6,18 @@
 <!-- GOOGLE FONTS -->
 <link href="https://fonts.googleapis.com/css?family=Montserrat:400,500|Poppins:400,500,600,700|Roboto:400,500"
     rel="stylesheet" />
-<link href="https://cdn.materialdesignicons.com/4.4.95/css/materialdesignicons.min.css" rel="stylesheet" />
-<!-- SLEEK CSS -->
-<link id="sleek-css" rel="stylesheet" href="assets/css/sleek.min.css" />
-<link href="assets/plugins/toastr/toastr.min.css" rel="stylesheet" />
+<!-- Bootstrap 5 CSS + Icons -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+
 <link href="assets/css/theme.css" rel="stylesheet" />
 <!-- FAVICON -->
 <link href="assets/img/favicon.png" rel="shortcut icon" />
 <style>
   /* Header color flip via class already handled in JS */
-</style>
+  /* Sleek removed */
+  </style>
 <script>
-  // Apply saved theme as early as possible to avoid FOUC
   (function(){
     try{
       var theme = (function(){
@@ -30,11 +30,9 @@
         return 'light';
       })();
       if(theme==='dark'){
-        document.documentElement.classList.add('theme-dark');
-        document.documentElement.setAttribute('data-theme','dark');
+        document.documentElement.setAttribute('data-bs-theme','dark');
       } else {
-        document.documentElement.classList.remove('theme-dark');
-        document.documentElement.setAttribute('data-theme','light');
+        document.documentElement.setAttribute('data-bs-theme','light');
       }
     }catch(e){}
   })();

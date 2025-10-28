@@ -48,7 +48,6 @@ func New(fc *filecache.Cache, ss *torrent.Stats, s *torrent.Service, ch *config.
 
 	r.GET("/", indexHandler(ss))
 	r.GET("/routes", indexHandler(ss))
-	r.GET("/dashboard", dashboardHandler)
 	r.GET("/logs", logsHandler)
 	r.GET("/settings", settingsHandler)
 

@@ -20,8 +20,8 @@ Handlebars.registerHelper("torrent_status", function (chunks, totalPieces) {
         div.setAttribute("role", "progressbar");
 
         if (pieceStatusTip) {
-            div.setAttribute("data-toggle", "tooltip");
-            div.setAttribute("data-placement", "top");
+            div.setAttribute("data-bs-toggle", "tooltip");
+            div.setAttribute("data-bs-placement", "top");
             div.setAttribute("title", pieceStatusTip);
         }
 
@@ -62,13 +62,13 @@ Handlebars.registerHelper("torrent_info", function (peers, seeders, pieceSize) {
     }
 
     const level = ["text-success", "text-warning", "text-danger"];
-    const icon = ["mdi-check", "mdi-alert", "mdi-alert-octagram"];
+    const icon = ["bi-check-circle", "bi-exclamation-triangle", "bi-exclamation-octagon"];
     const div = document.createElement("div");
     const i = document.createElement("i");
 
     const errIndex = Math.max(...errorLevels);
 
-    i.className = "mdi " + icon[errIndex];
+    i.className = "bi " + icon[errIndex];
     i.title = messages.join("\n");
 
     var ps = (typeof pieceSize === 'number') ? pieceSize : 0;
@@ -104,11 +104,11 @@ Handlebars.registerHelper("health_cell", function (peers, seeders) {
     var sr = (typeof seeders === 'number') ? seeders : Number(seeders) || 0;
     var display = sr + '/' + pr; // seeders/peers
     if (sr <= 0) {
-        return '<span class="text-danger" title="Unhealthy: ' + display + '"><i class="mdi mdi-close-circle"></i> ' + display + '</span>';
+        return '<span class="text-danger" title="Unhealthy: ' + display + '"><i class="bi bi-x-circle"></i> ' + display + '</span>';
     } else if (sr < 2) {
-        return '<span class="text-warning" title="Weak: ' + display + '"><i class="mdi mdi-alert"></i> ' + display + '</span>';
+        return '<span class="text-warning" title="Weak: ' + display + '"><i class="bi bi-exclamation-triangle"></i> ' + display + '</span>';
     }
-    return '<span class="text-success" title="Healthy: ' + display + '"><i class="mdi mdi-check-circle"></i> ' + display + '</span>';
+    return '<span class="text-success" title="Healthy: ' + display + '"><i class="bi bi-check-circle"></i> ' + display + '</span>';
 });
 
 Distribyted.routes = {
@@ -161,20 +161,14 @@ Distribyted.routes = {
     },
 
     _getRoutesJson: function () {
-        return fetch('/api/routes')
-            .then(function (response) {
-                if (response.ok) {
-                    return response.json();
-                } else {
-                    Distribyted.message.error('Error getting data from server. Response: ' + response.status)
-                }
-            }).then(function (routes) {
+        return Distribyted.http.getJSON('/api/routes')
+            .then(function(routes){
                 routes = routes || [];
-                // Expect lightweight objects: { name, folder, total }
                 return routes.filter(function(r){ return r && r.name; });
             })
-            .catch(function (error) {
-                Distribyted.message.error('Error getting status info: ' + error.message)
+            .catch(function (xhr) {
+                var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.status) || 'request failed';
+                Distribyted.message.error('Error getting status info: ' + msg)
             });
     },
 
@@ -196,20 +190,14 @@ Distribyted.routes = {
     },
 
     _getWatchInterval: function () {
-        return fetch('/api/watch_interval')
-            .then(function (response) {
-                if (response.ok) {
-                    return response.json();
-                } else {
-                    Distribyted.message.error('Error getting watch interval. Response: ' + response.status)
-                }
-            }).then(function (json) {
-                if (json && json.interval)
-                    Distribyted.routes._interval = json.interval
+        return Distribyted.http.getJSON('/api/watch_interval')
+            .then(function (json) {
+                if (json && json.interval) Distribyted.routes._interval = json.interval;
                 return json;
             })
-            .catch(function (error) {
-                Distribyted.message.error('Error getting watch interval: ' + error.message)
+            .catch(function (xhr) {
+                var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.status) || 'request failed';
+                Distribyted.message.error('Error getting watch interval: ' + msg)
             });
     },
 
@@ -284,47 +272,34 @@ Distribyted.routes = {
         if(!confirm('Delete this torrent?')) { return Promise.resolve(); }
         var url = '/api/routes/' + encodeURIComponent(route) + '/torrent/' + torrentHash
 
-        return fetch(url, {
-            method: 'DELETE'
-        })
-            .then(function (response) {
-                if (response.ok) {
-                    Distribyted.message.info('Torrent deleted.')
-                    Distribyted.routes.loadView();
-                } else {
-                    response.json().then(json => {
-                        Distribyted.message.error('Error deletting torrent. Response: ' + json.error)
-                    })
-                }
+        return Distribyted.http.delete(url)
+            .then(function(){
+                Distribyted.message.info('Torrent deleted.');
+                Distribyted.routes.loadView();
             })
-            .catch(function (error) {
-                Distribyted.message.error('Error deletting torrent: ' + error.message)
+            .catch(function (xhr) {
+                var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.statusText) || 'request failed';
+                Distribyted.message.error('Error deletting torrent: ' + msg)
             });
     },
 
     blacklistTorrent: function(route, torrentHash){
         if(!confirm('Blacklist and re-request this item from Arr?')) { return Promise.resolve(); }
         var url = '/api/routes/' + encodeURIComponent(route) + '/torrent/' + torrentHash + '/blacklist'
-        return fetch(url, { method: 'POST' })
-            .then(function(response){
-                if(response.ok){
-                    Distribyted.message.info('Blacklisted and removed.');
-                    Distribyted.routes.loadView();
-                }else{
-                    response.json().then(json => {
-                        Distribyted.message.error('Error blacklisting: ' + (json.error || 'unknown'))
-                    })
-                }
+        return $.ajax({ url: url, method: 'POST' })
+            .then(function(){
+                Distribyted.message.info('Blacklisted and removed.');
+                Distribyted.routes.loadView();
             })
-            .catch(function (error) {
-                Distribyted.message.error('Error blacklisting: ' + error.message)
+            .catch(function (xhr) {
+                var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.statusText) || 'request failed';
+                Distribyted.message.error('Error blacklisting: ' + msg)
             });
     },
 
     showDetails: function(route, hash, name){
         var url = '/api/routes/' + encodeURIComponent(route) + '/torrent/' + encodeURIComponent(hash);
-        fetch(url)
-            .then(function(response){ return response.json(); })
+        Distribyted.http.getJSON(url)
             .then(function(data){
                 if(!data || !data.stats){
                     Distribyted.message.error('No details available');
@@ -334,17 +309,17 @@ Distribyted.routes = {
                 var fuse = (data.paths && data.paths.fuse) ? (data.paths.fuse + '/' + (ts.name || '')) : '';
                 var httpfs = (data.paths && data.paths.httpfs) ? (data.paths.httpfs + '/' + (ts.name || '')) : '';
                 var html = '' +
-                    '<div class="modal fade" id="torrentModal" tabindex="-1" role="dialog" aria-hidden="true">' +
-                    '  <div class="modal-dialog modal-lg" role="document">' +
+                    '<div class="modal fade" id="torrentModal" tabindex="-1" aria-hidden="true">' +
+                    '  <div class="modal-dialog modal-lg">' +
                     '    <div class="modal-content">' +
                     '      <div class="modal-header">' +
                     '        <h5 class="modal-title">' + (name || ts.name || '') + '</h5>' +
-                    '        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>' +
+                    '        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>' +
                     '      </div>' +
                     '      <div class="modal-body">' +
                     '        <ul class="nav nav-tabs" role="tablist">' +
-                    '          <li class="nav-item"><a class="nav-link active" id="info-tab" data-toggle="tab" href="#tab-info" role="tab">Info</a></li>' +
-                    '          <li class="nav-item"><a class="nav-link" id="files-tab" data-toggle="tab" href="#tab-files" role="tab">Files</a></li>' +
+                    '          <li class="nav-item"><a class="nav-link active" id="info-tab" data-bs-toggle="tab" href="#tab-info" role="tab">Info</a></li>' +
+                    '          <li class="nav-item"><a class="nav-link" id="files-tab" data-bs-toggle="tab" href="#tab-files" role="tab">Files</a></li>' +
                     '        </ul>' +
                     '        <div class="tab-content" style="padding-top:12px;">' +
                     '          <div class="tab-pane fade show active" id="tab-info" role="tabpanel" aria-labelledby="info-tab">' +
@@ -367,7 +342,7 @@ Distribyted.routes = {
                     '        </div>' +
                     '      </div>' +
                     '      <div class="modal-footer">' +
-                    '        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>' +
+                    '        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>' +
                     '      </div>' +
                     '    </div>' +
                     '  </div>' +
@@ -378,25 +353,29 @@ Distribyted.routes = {
                 var div = document.createElement('div');
                 div.innerHTML = html;
                 document.body.appendChild(div.firstChild);
-                $('#torrentModal').modal('show');
+                var modalEl = document.getElementById('torrentModal');
+                var bsModal = new bootstrap.Modal(modalEl);
+                bsModal.show();
                 // Load files when Files tab is shown (lazy)
-                $('a#files-tab').on('shown.bs.tab', function(){
+                var filesTab = document.getElementById('files-tab');
+                if(filesTab){ filesTab.addEventListener('shown.bs.tab', function(){
                     var tree = document.getElementById('files-tree');
                     if(tree && !tree.getAttribute('data-loaded')){
-                        fetch('/api/routes/' + encodeURIComponent(route) + '/torrent/' + encodeURIComponent(hash) + '/files')
-                          .then(function(r){ return r.json(); })
+                        Distribyted.http.getJSON('/api/routes/' + encodeURIComponent(route) + '/torrent/' + encodeURIComponent(hash) + '/files')
                           .then(function(payload){
                               var files = (payload && Array.isArray(payload.files)) ? payload.files : [];
                               tree.innerHTML = Distribyted.routes.renderTree(files);
                               tree.setAttribute('data-loaded','1');
-                          }).catch(function(err){
-                              tree.innerHTML = '<div class="text-danger">Error loading files: ' + err.message + '</div>';
+                          }).catch(function(xhr){
+                              var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.statusText) || 'request failed';
+                              tree.innerHTML = '<div class="text-danger">Error loading files: ' + msg + '</div>';
                           });
                     }
-                });
+                }); }
             })
-            .catch(function(err){
-                Distribyted.message.error('Error loading details: ' + err.message)
+            .catch(function(xhr){
+                var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.statusText) || 'request failed';
+                Distribyted.message.error('Error loading details: ' + msg)
             })
     },
     // Build a fully-expanded tree HTML from flat file paths
@@ -417,13 +396,13 @@ Distribyted.routes = {
             }
         });
         function renderNode(node){
-            var html = '<ul class="list-unstyled ml-2">';
+            var html = '<ul class="list-unstyled ms-2">';
             Object.keys(node.children).sort().forEach(function(name){
                 var n = node.children[name];
                 if(n.isFile && Object.keys(n.children).length === 0){
-                    html += '<li><span class="mdi mdi-file-outline mr-1"></span>' + name + ' <span class="text-muted">(' + Humanize.bytes(n.size||0, 1024) + ')</span></li>';
+                    html += '<li><span class="bi bi-file-earmark me-1"></span>' + name + ' <span class="text-muted">(' + Humanize.bytes(n.size||0, 1024) + ')</span></li>';
                 } else {
-                    html += '<li><span class="mdi mdi-folder-outline mr-1"></span>' + name;
+                    html += '<li><span class="bi bi-folder me-1"></span>' + name;
                     html += renderNode(n);
                     html += '</li>';
                 }
@@ -446,87 +425,75 @@ Distribyted.routes = {
         }
         var fd = new FormData();
         fd.append('file', input.files[0]);
-        fetch('/api/routes/' + encodeURIComponent(route) + '/files', {
-            method: 'POST',
-            body: fd
-        }).then(function(response){
-            if(response.ok){
+        Distribyted.http.upload('/api/routes/' + encodeURIComponent(route) + '/files', fd)
+            .then(function(){
                 Distribyted.message.info('File uploaded');
                 input.value = '';
                 Distribyted.routes.loadView();
-            } else {
-                response.json().then(json => {
-                    Distribyted.message.error('Error uploading: ' + json.error)
-                })
-            }
-        }).catch(function(error){
-            Distribyted.message.error('Error uploading: ' + error.message)
-        })
+            }).catch(function(xhr){
+                var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.statusText) || 'request failed';
+                Distribyted.message.error('Error uploading: ' + msg)
+            })
     },
     addMagnet: function(route){
         var magnet = window.prompt('Paste magnet URL');
         if(!magnet){ return; }
         var url = '/api/routes/' + encodeURIComponent(route) + '/torrent';
         var body = JSON.stringify({ magnet: magnet });
-        fetch(url, { method: 'POST', body: body })
-            .then(function(response){
-                if(response.ok){
-                    Distribyted.message.info('New magnet added.');
-                    Distribyted.routes.loadView();
-                } else {
-                    response.json().then(json => {
-                        Distribyted.message.error('Error adding new magnet: ' + json.error)
-                    }).catch(function(){
-                        Distribyted.message.error('Error adding new magnet: ' + response.status)
-                    })
-                }
-            }).catch(function(error){
-                Distribyted.message.error('Error adding new magnet: ' + error.message)
+        $.ajax({ url: url, method: 'POST', contentType: 'application/json', data: body })
+            .then(function(){
+                Distribyted.message.info('New magnet added.');
+                Distribyted.routes.loadView();
+            }).catch(function(xhr){
+                var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.statusText) || 'request failed';
+                Distribyted.message.error('Error adding new magnet: ' + msg)
             })
     },
     createRoute: function(name){
-        return fetch('/api/routes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name })
-        }).then(function(response){
-            if(response.ok){
+        return $.ajax({ url: '/api/routes', method: 'POST', contentType: 'application/json', data: JSON.stringify({ name: name }) })
+            .then(function(){
                 Distribyted.message.info('Route created');
                 Distribyted.routes.loadView();
-            } else {
-                response.json().then(json => {
-                    Distribyted.message.error('Error creating route: ' + json.error)
-                })
-            }
-        }).catch(function(error){
-            Distribyted.message.error('Error creating route: ' + error.message)
-        });
+            }).catch(function(xhr){
+                var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.statusText) || 'request failed';
+                Distribyted.message.error('Error creating route: ' + msg)
+            });
     },
     deleteRoute: function(name){
-        return fetch('/api/routes/' + encodeURIComponent(name), { method: 'DELETE' })
-            .then(function(response){
-                if(response.ok){
-                    Distribyted.message.info('Route deleted');
-                    // Optimistically remove from DOM to avoid stale view
-                    var cards = document.querySelectorAll('.card .card-header h2');
-                    for (var i = 0; i < cards.length; i++) {
-                        var h2 = cards[i];
-                        if (h2 && h2.textContent && h2.textContent.indexOf(name) !== -1) {
-                            var cc = h2.closest('.card');
-                            if (cc && cc.parentNode) {
-                                cc.parentNode.remove();
-                            }
-                        }
-                    }
-                    Distribyted.routes.loadView();
-                } else {
-                    response.json().then(json => {
-                        Distribyted.message.error('Error deleting route: ' + json.error)
-                    })
-                }
-            }).catch(function(error){
-                Distribyted.message.error('Error deleting route: ' + error.message)
-            });
+        // Bootstrap confirm modal
+        var html = ''+
+        '<div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-hidden="true">'+
+        '  <div class="modal-dialog">'+
+        '    <div class="modal-content">'+
+        '      <div class="modal-header">'+
+        '        <h5 class="modal-title">Delete Route</h5>'+
+        '        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>'+
+        '      </div>'+
+        '      <div class="modal-body">Are you sure you want to delete route <strong>'+ (name||'') +'</strong>? This cannot be undone.</div>'+
+        '      <div class="modal-footer">'+
+        '        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>'+
+        '        <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>'+
+        '      </div>'+
+        '    </div>'+
+        '  </div>'+
+        '</div>';
+        var old = document.getElementById('confirmDeleteModal');
+        if(old && old.parentNode){ old.parentNode.removeChild(old); }
+        var d = document.createElement('div'); d.innerHTML = html; document.body.appendChild(d.firstChild);
+        var modalEl = document.getElementById('confirmDeleteModal');
+        var modal = new bootstrap.Modal(modalEl);
+        modalEl.querySelector('#confirm-delete-btn').addEventListener('click', function(){
+            Distribyted.http.delete('/api/routes/' + encodeURIComponent(name))
+              .then(function(){
+                modal.hide();
+                Distribyted.message.info('Route deleted');
+                Distribyted.routes.loadView();
+              }).catch(function(xhr){
+                var msg = (xhr && xhr.responseJSON && xhr.responseJSON.error) || (xhr && xhr.statusText) || 'request failed';
+                Distribyted.message.error('Error deleting route: ' + msg)
+              });
+        });
+        modal.show();
     },
     // Pagination controls
     pagePrev: function(route){
@@ -541,13 +508,12 @@ Distribyted.routes = {
         this._pages[route] = p + 1;
         this._renderRoutePage(route);
     },
-	_renderRoutePage: function(route){
+    _renderRoutePage: function(route){
 		var p = this._pages[route] || 1;
 		var size = 25;
 		var self = this;
-		fetch('/api/routes/' + encodeURIComponent(route) + '/torrents?page=' + p + '&size=' + size)
-			.then(function(response){ return response.json(); })
-			.then(function(data){
+        Distribyted.http.getJSON('/api/routes/' + encodeURIComponent(route) + '/torrents?page=' + p + '&size=' + size)
+            .then(function(data){
 				var tbody = document.getElementById('tbody-' + route);
 				var pager = document.getElementById('pager-' + route);
 				if(!tbody){ return; }
@@ -583,11 +549,11 @@ Distribyted.routes = {
 
                         var tdActions = document.createElement('td');
                         var iBlk = document.createElement('i');
-                        iBlk.className = 'mdi mdi-24px mdi-block-helper mr-2';
+                        iBlk.className = 'bi bi-ban me-2';
                         iBlk.title = 'blacklist and re-request';
                         tdActions.appendChild(iBlk);
                         var iDel = document.createElement('i');
-                        iDel.className = 'mdi mdi-24px mdi-delete-forever';
+                        iDel.className = 'bi bi-trash';
                         iDel.title = 'delete torrent';
                         tdActions.appendChild(iDel);
                         tr.appendChild(tdActions);
@@ -645,6 +611,8 @@ Distribyted.routes = {
                 }
                 // Remove rows that are no longer present
                 Array.from(tbody.children).forEach(function(tr){ if(tr.id && !desiredIds.has(tr.id)){ tbody.removeChild(tr); }});
+                // Initialize any tooltips in the updated content
+                try { var tt = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]')); tt.forEach(function(el){ new bootstrap.Tooltip(el); }); } catch(e) {}
                 });
             })
     },
