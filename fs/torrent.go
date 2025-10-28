@@ -315,3 +315,5 @@ func (d *torrentFile) prefetchAt(nextOff int64) {
 		// no spare reader; skip prefetch
 	}
 }
+
+// (Removed stub/lazy materialization; original load-based behavior restored)

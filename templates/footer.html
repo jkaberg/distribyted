@@ -11,6 +11,8 @@
 <script src="assets/js/common.js"></script>
 <script src="assets/js/cache_chart.js"></script>
 <script src="assets/js/topbar.js"></script>
+<script src="assets/js/theme.js"></script>
 <script>
+  try{ if(window.Distribyted && Distribyted.theme){ Distribyted.theme.init(); } }catch(e){}
   if (window.Distribyted && Distribyted.topbar) { try { Distribyted.topbar.start(); } catch(e){} }
   </script>

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -79,11 +80,11 @@ type Service struct {
 	cachedConn   bool
 	lastNetCheck time.Time
 
-	// stop channel for background persistence
-	persistStop chan struct{}
-
-	// cached torrent state loaded from disk to avoid early network usage
+	// cached torrent state loaded from DB to avoid early network usage
 	cached map[string]*cachedState
+
+	// stop channel for background DB metadata persistence
+	metaPersistStop chan struct{}
 }
 
 func NewService(loaders []loader.Loader, db loader.LoaderAdder, stats *Stats, c *torrent.Client, addTimeout, readTimeout int, continueWhenAddTimeout bool, routesRoot string) *Service {
@@ -104,8 +105,8 @@ func NewService(loaders []loader.Loader, db loader.LoaderAdder, stats *Stats, c 
 		watchers:               make(map[string]*RouteWatcher),
 		readerPoolSize:         4,
 		readaheadMB:            2,
-		persistStop:            make(chan struct{}),
 		cached:                 make(map[string]*cachedState),
+		metaPersistStop:        make(chan struct{}),
 	}
 }
 
@@ -234,6 +235,163 @@ func (s *Service) Load() (map[string]fs.Filesystem, error) {
 	return s.fss, s.load(s.db)
 }
 
+// PreAddRoutes mounts route filesystems into the container without adding torrents.
+// This makes routes visible in FUSE/WebDAV/HTTPFS immediately at startup, while
+// actual torrent loading can proceed asynchronously.
+func (s *Service) PreAddRoutes() {
+	// routes from configured loaders
+	for _, l := range s.loaders {
+		if list, err := l.ListMagnets(); err == nil {
+			for r := range list {
+				s.addRoute(r)
+			}
+		}
+		if list, err := l.ListTorrentPaths(); err == nil {
+			for r := range list {
+				s.addRoute(r)
+			}
+		}
+	}
+	// routes from DB
+	if s.db != nil {
+		if list, err := s.db.ListMagnets(); err == nil {
+			for r := range list {
+				s.addRoute(r)
+			}
+		}
+		if list, err := s.db.ListTorrentPaths(); err == nil {
+			for r := range list {
+				s.addRoute(r)
+			}
+		}
+	}
+	// routes from UI-managed routesRoot
+	if s.routesRoot != "" {
+		if entries, err := os.ReadDir(s.routesRoot); err == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					s.addRoute(e.Name())
+				}
+			}
+		}
+	}
+
+	// Mount overlay over each route to expose cached DB listings without
+	// affecting file opens. The base torrent FS remains the source of truth.
+	s.mu.Lock()
+	// snapshot caches and current route filesystems
+	cached := make(map[string]*cachedState)
+	for h, v := range s.cached {
+		cached[h] = v
+	}
+	// Build per-route file and directory size indexes from cached summaries. We always expose a
+	// top-level folder per torrent named after torrent.Name, and place files
+	// under that folder so both single-file and multi-file torrents live in
+	// their own subdirectory.
+	toFile := func(sz int64) fs.File { return fs.NewInfoFile(sz) }
+
+	routeFiles := make(map[string]map[string]fs.File) // path -> placeholder file (InfoFile or InfoDir)
+	routeDirSize := make(map[string]map[string]int64) // dirPath -> aggregate size
+	for _, st := range cached {
+		r := st.summary.Route
+		name := st.summary.Name
+		if r == "" || name == "" {
+			continue
+		}
+		if routeFiles[r] == nil {
+			routeFiles[r] = make(map[string]fs.File)
+		}
+		if routeDirSize[r] == nil {
+			routeDirSize[r] = make(map[string]int64)
+		}
+		// Add files under the torrent root folder and accumulate dir sizes
+		if len(st.summary.Files) > 0 {
+			for _, f := range st.summary.Files {
+				rp := path.Join(name, f.Path)
+				routeFiles[r][rp] = toFile(f.Length)
+				// accumulate into all ancestor directories
+				d := rp
+				for {
+					d = path.Dir(d)
+					if d == "." || d == "/" {
+						break
+					}
+					routeDirSize[r][d] += f.Length
+				}
+			}
+		}
+		// Ensure the torrent root folder exists with aggregate size
+		total := routeDirSize[r][name]
+		if total == 0 {
+			// fallback to cached SizeBytes or piece estimate
+			if st.summary.SizeBytes > 0 {
+				total = st.summary.SizeBytes
+			} else if st.summary.PieceBytes > 0 && st.summary.TotalPieces > 0 {
+				total = int64(st.summary.PieceBytes) * int64(st.summary.TotalPieces)
+			}
+		}
+		routeFiles[r][name] = fs.NewInfoDir(total)
+	}
+
+	// Wrap existing route FSs with overlay
+	for mount, base := range s.fss {
+		// mount looks like "/<route>"
+		_, route := path.Split(mount)
+		files := routeFiles[route]
+		if len(files) == 0 {
+			continue
+		}
+		dirSize := routeDirSize[route]
+		lister := func(prefix string) (map[string]fs.File, error) {
+			// Convert cached logical tree into storage-like map for the prefix
+			// We only inject immediate children under the requested directory.
+			out := make(map[string]fs.File)
+			basePrefix := strings.TrimPrefix(prefix, "/")
+			for p, f := range files {
+				// p is a relative path under the route
+				// If prefix is "/" map first component; else match exact parent
+				if basePrefix == "" {
+					// inject top-level names
+					if i := strings.Index(p, string(os.PathSeparator)); i >= 0 {
+						name := p[:i]
+						if _, exists := out[name]; !exists {
+							// use aggregated size for this directory
+							out[name] = fs.NewInfoDir(dirSize[name])
+						}
+					} else {
+						out[p] = f
+					}
+				} else {
+					// only inject children directly under prefix
+					if strings.HasPrefix(p+string(os.PathSeparator), basePrefix+string(os.PathSeparator)) {
+						rest := strings.TrimPrefix(p, basePrefix+string(os.PathSeparator))
+						if rest == p { // not under prefix
+							continue
+						}
+						if j := strings.Index(rest, string(os.PathSeparator)); j >= 0 {
+							name := rest[:j]
+							if _, exists := out[name]; !exists {
+								// aggregated size for nested dir
+								sub := path.Join(basePrefix, name)
+								out[name] = fs.NewInfoDir(dirSize[sub])
+							}
+						} else if rest != "" {
+							out[rest] = f
+						}
+					}
+				}
+			}
+			return out, nil
+		}
+		s.fss[mount] = fs.NewOverlay(base, lister)
+		if s.cfs != nil {
+			_ = s.cfs.RemoveFS(mount)
+			_ = s.cfs.AddFS(s.fss[mount], mount)
+		}
+	}
+	s.mu.Unlock()
+}
+
 func (s *Service) load(l loader.Loader) error {
 	list, err := l.ListMagnets()
 	if err != nil {
@@ -304,6 +462,9 @@ func (s *Service) AddTorrentPath(r, p string) (string, error) {
 	s.mu.Lock()
 	s.pathToHash[p] = h
 	s.mu.Unlock()
+
+	// Track .torrent file association in DB
+	_ = s.db.AddTorrentFile(r, h, p)
 
 	return h, nil
 }
@@ -441,7 +602,15 @@ func (s *Service) addTorrent(r string, t *torrent.Torrent) error {
 	}
 
 	tfs.AddTorrent(t)
-	s.log.Info().Str("name", t.Info().Name).Str("route", r).Msg("torrent added")
+	// Guard: Info may be nil in non-blocking mode; fall back to t.Name()
+	tn := t.Name()
+	if ti := t.Info(); ti != nil && ti.Name != "" {
+		tn = ti.Name
+	}
+	s.log.Info().Str("name", tn).Str("route", r).Msg("torrent added")
+
+	// Persist minimal metadata to DB when info becomes available
+	go s.persistMetaFromTorrent(r, t)
 
 	return nil
 }
@@ -469,6 +638,13 @@ func (s *Service) RemoveFromHash(r, h string) error {
 	}
 
 	tfs.RemoveTorrent(h)
+
+	// Cleanup DB associations and cached metadata
+	_ = s.db.RemoveTorrentFile(r, h)
+	_ = s.db.DeleteMeta(h)
+	s.mu.Lock()
+	delete(s.cached, h)
+	s.mu.Unlock()
 
 	// Remove from client
 	var mh metainfo.Hash
@@ -500,6 +676,13 @@ func (s *Service) RemoveFromHashLocal(r, h string) error {
 
 	tfs.RemoveTorrent(h)
 
+	// Cleanup DB association and cached metadata for file-based torrents
+	_ = s.db.RemoveTorrentFile(r, h)
+	_ = s.db.DeleteMeta(h)
+	s.mu.Lock()
+	delete(s.cached, h)
+	s.mu.Unlock()
+
 	// Remove from client
 	var mh metainfo.Hash
 	if err := mh.FromHexString(h); err != nil {
@@ -512,6 +695,42 @@ func (s *Service) RemoveFromHashLocal(r, h string) error {
 	}
 
 	return nil
+}
+
+// FilesForHash returns the list of files (path and length) for a torrent hash.
+func (s *Service) FilesForHash(hash string) ([]fileSummary, error) {
+	// Try live torrent via client first
+	var mh metainfo.Hash
+	if err := mh.FromHexString(hash); err == nil {
+		if t, ok := s.c.Torrent(mh); ok {
+			// Ensure info is available
+			if t.Info() == nil {
+				select {
+				case <-t.GotInfo():
+				case <-time.After(2 * time.Second):
+					// fall through to cached
+				}
+			}
+			if ti := t.Info(); ti != nil {
+				var out []fileSummary
+				for _, f := range ti.Files {
+					out = append(out, fileSummary{Path: strings.Join(f.Path, string(os.PathSeparator)), Length: f.Length})
+				}
+				if len(out) == 0 && ti.Name != "" {
+					out = append(out, fileSummary{Path: ti.Name, Length: ti.TotalLength()})
+				}
+				return out, nil
+			}
+		}
+	}
+	// Fallback to cached state loaded from disk
+	s.mu.Lock()
+	cs := s.cached[hash]
+	s.mu.Unlock()
+	if cs != nil {
+		return cs.Files, nil
+	}
+	return nil, fmt.Errorf("unknown torrent or files unavailable")
 }
 
 // WatchInterval returns the current debounce interval in seconds used by the
@@ -725,42 +944,16 @@ func (s *Service) SetConfigHandler(ch *cfgpkg.Handler) {
 }
 
 // StartStatePersistence periodically dumps torrent summaries to disk for fast startup
-func (s *Service) StartStatePersistence() {
-	s.mu.Lock()
-	if s.persistStop == nil {
-		s.persistStop = make(chan struct{})
-	}
-	stop := s.persistStop
-	s.mu.Unlock()
-
-	go func() {
-		t := time.NewTicker(60 * time.Second)
-		defer t.Stop()
-		for {
-			if err := s.dumpState(); err != nil {
-				s.log.Warn().Err(err).Msg("state dump failed")
-			}
-			select {
-			case <-t.C:
-				continue
-			case <-stop:
-				return
-			}
-		}
-	}()
-}
+// StartStatePersistence removed: state.json no longer used
+// func (s *Service) StartStatePersistence() {}
 
 // StopStatePersistence stops background persistence and performs a final dump
-func (s *Service) StopStatePersistence() {
-	s.mu.Lock()
-	stop := s.persistStop
-	s.persistStop = nil
-	s.mu.Unlock()
-	if stop != nil {
-		close(stop)
-	}
-	_ = s.dumpState()
-}
+// StopStatePersistence removed: state.json no longer used
+// func (s *Service) StopStatePersistence() {}
+
+// PersistStateOnce forces a one-off state dump to disk
+// PersistStateOnce removed
+// func (s *Service) PersistStateOnce() error { return nil }
 
 type summary struct {
 	Hash       string        `json:"hash"`
@@ -774,6 +967,9 @@ type summary struct {
 	DownTotal  int64         `json:"downTotal"`
 	UpTotal    int64         `json:"upTotal"`
 	Files      []fileSummary `json:"files"`
+	// Extended snapshot for seamless UI
+	PieceChunks []*PieceChunk `json:"pieceChunks,omitempty"`
+	TotalPieces int           `json:"totalPieces,omitempty"`
 }
 
 type fileSummary struct {
@@ -785,115 +981,372 @@ type cachedState struct {
 	summary
 }
 
-func (s *Service) dumpState() error {
-	// Build summaries without heavy per-piece data by inspecting current torrents and stats
-	var out []summary
-	// take snapshots under lock
+// LoadMetaFromDB pre-populates minimal torrent stats from DB so UI is instant
+func (s *Service) LoadMetaFromDB() {
+	metas, err := s.db.GetAllMeta()
+	if err != nil || len(metas) == 0 {
+		return
+	}
 	s.s.mut.Lock()
+	now := time.Now()
+	for h, raw := range metas {
+		var sm summary
+		if err := json.Unmarshal(raw, &sm); err != nil {
+			continue
+		}
+		if sm.Hash == "" {
+			sm.Hash = h
+		}
+		s.s.previousStats[sm.Hash] = &stat{
+			time:               now,
+			createdAt:          time.Unix(sm.AddedAt, 0),
+			totalDownloadBytes: sm.DownTotal,
+			totalUploadBytes:   sm.UpTotal,
+			peers:              sm.Peers,
+			seeders:            sm.Seeders,
+		}
+		s.cached[sm.Hash] = &cachedState{summary: sm}
+	}
+	s.s.mut.Unlock()
+}
+
+// persistMetaFromTorrent waits for info and writes minimal metadata to DB and cache
+func (s *Service) persistMetaFromTorrent(route string, t *torrent.Torrent) {
+	if t == nil {
+		return
+	}
+	if t.Info() == nil {
+		select {
+		case <-t.GotInfo():
+		case <-time.After(time.Duration(s.addTimeout) * time.Second):
+			return
+		}
+	}
+	ti := t.Info()
+	if ti == nil {
+		return
+	}
+	var files []fileSummary
+	var size int64
+	for _, f := range ti.Files {
+		files = append(files, fileSummary{Path: strings.Join(f.Path, string(os.PathSeparator)), Length: f.Length})
+		size += f.Length
+	}
+	if size == 0 {
+		size = ti.TotalLength()
+	}
+	// include piece snapshot
+	var pch []*PieceChunk
+	var totalPieces int
+	for _, psr := range t.PieceStateRuns() {
+		var st PieceStatus
+		switch {
+		case psr.Checking:
+			st = Checking
+		case psr.Partial:
+			st = Partial
+		case psr.Complete:
+			st = Complete
+		case !psr.Ok:
+			st = Error
+		default:
+			st = Waiting
+		}
+		pch = append(pch, &PieceChunk{Status: st, NumPieces: psr.Length})
+		totalPieces += psr.Length
+	}
+
+	sm := summary{
+		Hash:        t.InfoHash().HexString(),
+		Route:       route,
+		Name:        t.Name(),
+		SizeBytes:   size,
+		PieceBytes:  ti.PieceLength,
+		AddedAt:     time.Now().Unix(),
+		Files:       files,
+		PieceChunks: pch,
+		TotalPieces: totalPieces,
+	}
+	b, err := json.Marshal(sm)
+	if err == nil {
+		_ = s.db.SetMeta(sm.Hash, b)
+		s.mu.Lock()
+		s.cached[sm.Hash] = &cachedState{summary: sm}
+		s.mu.Unlock()
+	}
+}
+
+// StartMetaPersistence periodically snapshots live stats to DB for fast startup cache
+func (s *Service) StartMetaPersistence() {
+	s.mu.Lock()
+	if s.metaPersistStop == nil {
+		s.metaPersistStop = make(chan struct{})
+	}
+	stop := s.metaPersistStop
+	s.mu.Unlock()
+
+	go func() {
+		t := time.NewTicker(60 * time.Second)
+		defer t.Stop()
+		for {
+			_ = s.dumpState()
+			select {
+			case <-t.C:
+				continue
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+// StopMetaPersistence stops background persistence and performs a final dump
+func (s *Service) StopMetaPersistence() {
+	s.mu.Lock()
+	stop := s.metaPersistStop
+	s.metaPersistStop = nil
+	s.mu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
+	_ = s.dumpState()
+}
+
+// dumpState snapshots live torrents and persists summaries into the DB metadata bucket
+func (s *Service) dumpState() error {
+	// Snapshot necessary data without calling methods that re-lock Stats
+	type snap struct {
+		hash     string
+		route    string
+		t        *torrent.Torrent
+		prevDown int64
+		prevUp   int64
+		peers    int
+		seeders  int
+		addedAt  int64
+	}
+	var snaps []snap
+	// Build hash->route map and collect previous stats under lock
+	s.s.mut.Lock()
+	hashToRoute := make(map[string]string)
+	for r, tl := range s.s.torrentsByRoute {
+		for h := range tl {
+			hashToRoute[h] = r
+		}
+	}
 	for h, t := range s.s.torrents {
-		route := s.s.RouteOf(h)
+		p := s.s.previousStats[h]
+		var downTot, upTot int64
+		var peers, seeders int
+		var added int64
+		if p != nil {
+			downTot = p.totalDownloadBytes
+			upTot = p.totalUploadBytes
+			peers = p.peers
+			seeders = p.seeders
+			added = p.createdAt.Unix()
+		}
+		snaps = append(snaps, snap{hash: h, route: hashToRoute[h], t: t, prevDown: downTot, prevUp: upTot, peers: peers, seeders: seeders, addedAt: added})
+	}
+	s.s.mut.Unlock()
+
+	// Build summaries including piece state snapshot
+	var out []summary
+	for _, sn := range snaps {
 		var name string
 		var size int64
 		var piece int64
 		var files []fileSummary
-		if ti := t.Info(); ti != nil {
-			name = t.Name()
-			piece = ti.PieceLength
-			for _, f := range ti.Files {
-				files = append(files, fileSummary{Path: strings.Join(f.Path, string(os.PathSeparator)), Length: f.Length})
-				size += f.Length
+		var pch []*PieceChunk
+		var totalPieces int
+		if sn.t != nil {
+			if ti := sn.t.Info(); ti != nil {
+				name = sn.t.Name()
+				piece = ti.PieceLength
+				for _, f := range ti.Files {
+					files = append(files, fileSummary{Path: strings.Join(f.Path, string(os.PathSeparator)), Length: f.Length})
+					size += f.Length
+				}
+				if size == 0 {
+					size = ti.TotalLength()
+				}
+				for _, psr := range sn.t.PieceStateRuns() {
+					var s PieceStatus
+					switch {
+					case psr.Checking:
+						s = Checking
+					case psr.Partial:
+						s = Partial
+					case psr.Complete:
+						s = Complete
+					case !psr.Ok:
+						s = Error
+					default:
+						s = Waiting
+					}
+					pch = append(pch, &PieceChunk{Status: s, NumPieces: psr.Length})
+					totalPieces += psr.Length
+				}
 			}
-			if size == 0 {
-				size = ti.TotalLength()
-			}
-		} else if cs := s.cached[h]; cs != nil {
-			name = cs.Name
-			size = cs.SizeBytes
-			piece = cs.PieceBytes
-			files = cs.Files
 		}
-		prev := s.s.previousStats[h]
-		var downTot, upTot int64
-		var peers, seeders int
-		var addedAt int64
-		if prev != nil {
-			downTot = prev.totalDownloadBytes
-			upTot = prev.totalUploadBytes
-			peers = prev.peers
-			seeders = prev.seeders
-			addedAt = prev.createdAt.Unix()
+		if name == "" {
+			if cs := s.cached[sn.hash]; cs != nil {
+				name = cs.Name
+				size = cs.SizeBytes
+				piece = cs.PieceBytes
+				files = cs.Files
+			}
 		}
 		out = append(out, summary{
-			Hash:       h,
-			Route:      route,
-			Name:       name,
-			SizeBytes:  size,
-			PieceBytes: piece,
-			AddedAt:    addedAt,
-			Peers:      peers,
-			Seeders:    seeders,
-			DownTotal:  downTot,
-			UpTotal:    upTot,
-			Files:      files,
+			Hash:        sn.hash,
+			Route:       sn.route,
+			Name:        name,
+			SizeBytes:   size,
+			PieceBytes:  piece,
+			AddedAt:     sn.addedAt,
+			Peers:       sn.peers,
+			Seeders:     sn.seeders,
+			DownTotal:   sn.prevDown,
+			UpTotal:     sn.prevUp,
+			Files:       files,
+			PieceChunks: pch,
+			TotalPieces: totalPieces,
 		})
 	}
-	s.s.mut.Unlock()
-	b, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return err
+	// persist each summary to DB
+	for _, sm := range out {
+		if b1, e := json.Marshal(sm); e == nil {
+			_ = s.db.SetMeta(sm.Hash, b1)
+		}
 	}
-	// write to metadata folder
-	s.mu.Lock()
-	ch := s.ch
-	s.mu.Unlock()
-	if ch == nil {
-		return nil
-	}
-	conf, err := ch.Get()
-	if err != nil || conf == nil || conf.Torrent == nil {
-		return err
-	}
-	path := filepath.Join(conf.Torrent.MetadataFolder, "state.json")
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return nil
 }
 
 // LoadState pre-populates minimal torrent stats from disk so UI is instant
-func (s *Service) LoadState() {
+// LoadState removed; replaced by LoadMetaFromDB
+
+// CachedRoutesStats builds route stats from cached summaries loaded at startup.
+// This is used before live torrents are fully loaded to make the UI responsive.
+func (s *Service) CachedRoutesStats() []*RouteStats {
 	s.mu.Lock()
-	ch := s.ch
+	cachedCopy := make(map[string]*cachedState, len(s.cached))
+	for k, v := range s.cached {
+		cachedCopy[k] = v
+	}
 	s.mu.Unlock()
-	if ch == nil {
-		return
+
+	byRoute := make(map[string][]*TorrentStats)
+	for _, cs := range cachedCopy {
+		r := cs.Route
+		ts := &TorrentStats{
+			Name:            cs.Name,
+			Hash:            cs.Hash,
+			SizeBytes:       cs.SizeBytes,
+			PieceSize:       cs.PieceBytes,
+			Peers:           cs.Peers,
+			Seeders:         cs.Seeders,
+			AddedAt:         cs.AddedAt,
+			DownloadedBytes: 0,
+			UploadedBytes:   0,
+			TimePassed:      1,
+		}
+		byRoute[r] = append(byRoute[r], ts)
 	}
-	conf, err := ch.Get()
-	if err != nil || conf == nil || conf.Torrent == nil {
-		return
+	var out []*RouteStats
+	for r, list := range byRoute {
+		sort.Sort(byName(list))
+		out = append(out, &RouteStats{Name: r, TorrentStats: list})
 	}
-	path := filepath.Join(conf.Torrent.MetadataFolder, "state.json")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return
+	sort.Sort(ByName(out))
+	return out
+}
+
+// CachedStat returns a TorrentStats synthesized from cached state for a hash, or nil if unavailable.
+func (s *Service) CachedStat(hash string) *TorrentStats {
+	s.mu.Lock()
+	cs := s.cached[hash]
+	s.mu.Unlock()
+	if cs == nil {
+		return nil
 	}
-	var list []summary
-	if err := json.Unmarshal(b, &list); err != nil {
-		return
+	return &TorrentStats{
+		Name:      cs.Name,
+		Hash:      cs.Hash,
+		SizeBytes: cs.SizeBytes,
+		PieceSize: cs.PieceBytes,
+		AddedAt:   cs.AddedAt,
+		Peers:     cs.Peers,
+		Seeders:   cs.Seeders,
+		// Downloaded/Uploaded left at 0; chunks omitted for performance
+		TimePassed: 1,
 	}
-	// Pre-populate previousStats entries so listings have names immediately
+}
+
+// MergedRoutePage returns a paginated union of live and cached torrents for a route.
+// Live entries take precedence; cached-only entries fill gaps until torrents are loaded.
+func (s *Service) MergedRoutePage(route string, page, size int) *RoutePageStats {
+	if size <= 0 {
+		size = 25
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	// Collect live stats for route
 	s.s.mut.Lock()
 	now := time.Now()
-	for _, sm := range list {
-		if sm.Hash == "" {
-			continue
+	var live []*TorrentStats
+	liveSet := make(map[string]struct{})
+	if tl, ok := s.s.torrentsByRoute[route]; ok {
+		for _, t := range tl {
+			ts := s.s.stats(now, t, false)
+			live = append(live, ts)
+			liveSet[ts.Hash] = struct{}{}
 		}
-		s.s.previousStats[sm.Hash] = &stat{time: now, createdAt: time.Unix(sm.AddedAt, 0)}
-		// cache full state for use before metadata arrives
-		s.cached[sm.Hash] = &cachedState{summary: sm}
 	}
 	s.s.mut.Unlock()
+
+	// Add cached-only entries for this route
+	s.mu.Lock()
+	for _, cs := range s.cached {
+		if cs.Route != route {
+			continue
+		}
+		if _, ok := liveSet[cs.Hash]; ok {
+			continue
+		}
+		live = append(live, &TorrentStats{
+			Name:       cs.Name,
+			Hash:       cs.Hash,
+			SizeBytes:  cs.SizeBytes,
+			PieceSize:  cs.PieceBytes,
+			AddedAt:    cs.AddedAt,
+			Peers:      cs.Peers,
+			Seeders:    cs.Seeders,
+			TimePassed: 1,
+		})
+	}
+	s.mu.Unlock()
+
+	sort.Sort(byName(live))
+
+	total := len(live)
+	start := (page - 1) * size
+	if start > total {
+		start = total
+	}
+	end := start + size
+	if end > total {
+		end = total
+	}
+
+	return &RoutePageStats{
+		Name:  route,
+		Page:  page,
+		Size:  size,
+		Total: total,
+		Items: live[start:end],
+	}
 }
 
 // ConfigSnapshot returns a copy of the current config from handler, if present

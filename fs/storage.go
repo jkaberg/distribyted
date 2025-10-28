@@ -197,6 +197,11 @@ func (s *storage) Get(path string) (File, error) {
 func (s *storage) getFileFromFs(p string) (File, error) {
 	for fsp, fs := range s.filesystems {
 		if strings.HasPrefix(p, fsp) {
+			// If querying the mount path itself, present it as a directory to
+			// allow stat() and ls -l to succeed before underlying FS is ready.
+			if p == fsp {
+				return &Dir{}, nil
+			}
 			return fs.Open(separator + strings.TrimPrefix(p, fsp))
 		}
 	}

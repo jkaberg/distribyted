@@ -116,6 +116,9 @@ Distribyted.routes = {
     _interval: 5,
     _pauseUntil: 0,
     _pages: {},
+    _mounted: false,
+    _timer: null,
+    _lastRouteKey: "",
 
     _isBusy: function () {
         // Avoid re-render during file selection/upload
@@ -137,24 +140,22 @@ Distribyted.routes = {
 
     _getTemplate: function () {
         if (this._template != null) {
-            return this._template
+            return this._template;
         }
-
+        // Prefer inline template if available
+        var el = document.getElementById('routes-template');
+        if (el && el.innerHTML) {
+            try{
+                var compiled = Handlebars.compile(el.innerHTML);
+                this._template = Promise.resolve(compiled);
+                return this._template;
+            }catch(e){ /* fallback to fetch */ }
+        }
+        // Fallback: fetch legacy external template if inline not found
         const tTemplate = fetch('/assets/templates/routes.html')
-            .then((response) => {
-                if (response.ok) {
-                    return response.text();
-                } else {
-                    Distribyted.message.error('Error getting data from server. Response: ' + response.status);
-                }
-            })
-            .then((t) => {
-                return Handlebars.compile(t);
-            })
-            .catch(error => {
-                Distribyted.message.error('Error getting routes template: ' + error.message);
-            });
-
+            .then(function(response){ if(response.ok) return response.text(); throw new Error('HTTP '+response.status); })
+            .then(function(t){ return Handlebars.compile(t); })
+            .catch(function(error){ Distribyted.message.error('Error getting routes template: ' + error.message); });
         this._template = tTemplate;
         return tTemplate;
     },
@@ -177,6 +178,23 @@ Distribyted.routes = {
             });
     },
 
+    _routeKey: function(routes){
+        try{
+            var names = (routes||[]).map(function(r){ return r && r.name ? r.name : ''; }).filter(Boolean).sort();
+            return names.join('|');
+        }catch(e){ return ''; }
+    },
+
+    _updateTotals: function(routes){
+        (routes||[]).forEach(function(r){
+            if(!(r && r.name)) return;
+            var el = document.getElementById('total-' + r.name);
+            if(el && String(el.textContent) !== String(r.total||0)){
+                el.textContent = String(r.total||0);
+            }
+        });
+    },
+
     _getWatchInterval: function () {
         return fetch('/api/watch_interval')
             .then(function (response) {
@@ -194,6 +212,73 @@ Distribyted.routes = {
                 Distribyted.message.error('Error getting watch interval: ' + error.message)
             });
     },
+
+	// Pagination helpers
+	_gotoPage: function(route, page, totalPages){
+		if(typeof page !== 'number'){ page = parseInt(page, 10) || 1; }
+		if(totalPages && totalPages > 0){
+			if(page < 1) page = 1;
+			if(page > totalPages) page = totalPages;
+		}
+		this._pages[route] = page;
+		this._renderRoutePage(route);
+	},
+	_renderPager: function(route, page, size, total){
+		var ul = document.getElementById('pagination-' + route);
+		var pager = document.getElementById('pager-' + route);
+		var totalPages = Math.max(1, Math.ceil((Number(total)||0) / (Number(size)||1)));
+		if(!pager){ return; }
+		if(totalPages <= 1){ pager.style.display = 'none'; return; } else { pager.style.display = ''; }
+		if(!ul){
+			// nothing to render into
+			return;
+		}
+		function li(label, targetPage, opts){
+			opts = opts || {};
+			var disabled = opts.disabled ? ' disabled' : '';
+			var active = opts.active ? ' active' : '';
+			var data = (typeof targetPage === 'number') ? (' data-page="' + String(targetPage) + '"') : '';
+			var href = (typeof targetPage === 'number') ? '#' : 'javascript:void(0)';
+			var aria = opts.aria ? (' aria-label="' + opts.aria + '"') : '';
+			return '<li class="page-item' + disabled + active + '"><a class="page-link" href="' + href + '"' + data + aria + '>' + label + '</a></li>';
+		}
+		var html = '';
+		// First / Prev (chevrons for consistent sizing)
+		html += li('«', 1, { disabled: page <= 1, aria: 'First' });
+		html += li('‹', page - 1, { disabled: page <= 1, aria: 'Previous' });
+		// Page window with ellipses
+		var windowSize = 5;
+		var start = Math.max(1, page - Math.floor(windowSize/2));
+		var end = Math.min(totalPages, start + windowSize - 1);
+		start = Math.max(1, Math.min(start, end - windowSize + 1));
+		if(start > 1){
+			html += li('1', 1, { active: page === 1 });
+			if(start > 2){ html += '<li class="page-item disabled"><span class="page-link">…</span></li>'; }
+		}
+		for(var p = start; p <= end; p++){
+			html += li(String(p), p, { active: p === page });
+		}
+		if(end < totalPages){
+			if(end < totalPages - 1){ html += '<li class="page-item disabled"><span class="page-link">…</span></li>'; }
+			html += li(String(totalPages), totalPages, { active: page === totalPages });
+		}
+		// Next / Last (chevrons)
+		html += li('›', page + 1, { disabled: page >= totalPages, aria: 'Next' });
+		html += li('»', totalPages, { disabled: page >= totalPages, aria: 'Last' });
+		ul.innerHTML = html;
+		// Bind click handlers
+		var links = ul.querySelectorAll('a.page-link[data-page]');
+		var self = this;
+		Array.prototype.forEach.call(links, function(a){
+			a.addEventListener('click', function(e){
+				e.preventDefault();
+				var tp = parseInt(a.getAttribute('data-page'), 10);
+				if(!isNaN(tp)){
+					self._gotoPage(route, tp, totalPages);
+				}
+			});
+		});
+	},
 
     deleteTorrent: function (route, torrentHash) {
         if(!confirm('Delete this torrent?')) { return Promise.resolve(); }
@@ -257,13 +342,28 @@ Distribyted.routes = {
                     '        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>' +
                     '      </div>' +
                     '      <div class="modal-body">' +
-                    '        <div class="container-fluid">' +
-                    '          <div class="row"><div class="col-3 font-weight-bold">Hash</div><div class="col-9"><code>' + (ts.hash || '') + '</code></div></div>' +
-                    '          <div class="row"><div class="col-3 font-weight-bold">Seeders/Peers</div><div class="col-9">' + (ts.seeders||0) + '/' + (ts.peers||0) + '</div></div>' +
-                    '          <div class="row"><div class="col-3 font-weight-bold">Piece size</div><div class="col-9">' + Humanize.bytes(ts.pieceSize||0, 1024) + '</div></div>' +
-                    '          <div class="row"><div class="col-3 font-weight-bold">Route folder</div><div class="col-9"><code>' + (data.folder || '') + '</code></div></div>' +
-                    '          <div class="row"><div class="col-3 font-weight-bold">FUSE path</div><div class="col-9"><code>' + fuse + '</code></div></div>' +
-                    '          <div class="row"><div class="col-3 font-weight-bold">HTTPFS path</div><div class="col-9"><a href="' + httpfs + '" target="_blank">' + httpfs + '</a></div></div>' +
+                    '        <ul class="nav nav-tabs" role="tablist">' +
+                    '          <li class="nav-item"><a class="nav-link active" id="info-tab" data-toggle="tab" href="#tab-info" role="tab">Info</a></li>' +
+                    '          <li class="nav-item"><a class="nav-link" id="files-tab" data-toggle="tab" href="#tab-files" role="tab">Files</a></li>' +
+                    '        </ul>' +
+                    '        <div class="tab-content" style="padding-top:12px;">' +
+                    '          <div class="tab-pane fade show active" id="tab-info" role="tabpanel" aria-labelledby="info-tab">' +
+                    '            <div class="container-fluid">' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">Name</div><div class="col-9">' + (ts.name || '') + '</div></div>' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">Hash</div><div class="col-9"><code>' + (ts.hash || '') + '</code></div></div>' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">Size</div><div class="col-9">' + (ts.sizeBytes?Humanize.bytes(ts.sizeBytes,1024):'') + '</div></div>' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">Added at</div><div class="col-9">' + (ts.addedAt?new Date(ts.addedAt*1000).toLocaleString():'') + '</div></div>' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">Seeders/Peers</div><div class="col-9">' + (ts.seeders||0) + '/' + (ts.peers||0) + '</div></div>' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">Downloaded/Uploaded</div><div class="col-9">' + Humanize.bytes(ts.downloadedBytes||0,1024) + ' / ' + Humanize.bytes(ts.uploadedBytes||0,1024) + '</div></div>' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">Piece size</div><div class="col-9">' + Humanize.bytes(ts.pieceSize||0, 1024) + '</div></div>' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">Route folder</div><div class="col-9"><code>' + (data.folder || '') + '</code></div></div>' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">FUSE path</div><div class="col-9"><code>' + fuse + '</code></div></div>' +
+                    '              <div class="row"><div class="col-3 font-weight-bold">HTTPFS path</div><div class="col-9"><a href="' + httpfs + '" target="_blank">' + httpfs + '</a></div></div>' +
+                    '            </div>' +
+                    '          </div>' +
+                    '          <div class="tab-pane fade" id="tab-files" role="tabpanel" aria-labelledby="files-tab">' +
+                    '            <div id="files-tree" class="mb-2"></div>' +
+                    '          </div>' +
                     '        </div>' +
                     '      </div>' +
                     '      <div class="modal-footer">' +
@@ -279,10 +379,59 @@ Distribyted.routes = {
                 div.innerHTML = html;
                 document.body.appendChild(div.firstChild);
                 $('#torrentModal').modal('show');
+                // Load files when Files tab is shown (lazy)
+                $('a#files-tab').on('shown.bs.tab', function(){
+                    var tree = document.getElementById('files-tree');
+                    if(tree && !tree.getAttribute('data-loaded')){
+                        fetch('/api/routes/' + encodeURIComponent(route) + '/torrent/' + encodeURIComponent(hash) + '/files')
+                          .then(function(r){ return r.json(); })
+                          .then(function(payload){
+                              var files = (payload && Array.isArray(payload.files)) ? payload.files : [];
+                              tree.innerHTML = Distribyted.routes.renderTree(files);
+                              tree.setAttribute('data-loaded','1');
+                          }).catch(function(err){
+                              tree.innerHTML = '<div class="text-danger">Error loading files: ' + err.message + '</div>';
+                          });
+                    }
+                });
             })
             .catch(function(err){
                 Distribyted.message.error('Error loading details: ' + err.message)
             })
+    },
+    // Build a fully-expanded tree HTML from flat file paths
+    renderTree: function(files){
+        // Build nested structure using only children + isFile flags
+        var root = { children: {} };
+        files.forEach(function(f){
+            var p = (f && f.path) ? f.path : '';
+            var size = (f && typeof f.length === 'number') ? f.length : 0;
+            var segs = (p || '').split(/[\\\/]+/).filter(Boolean);
+            var cur = root;
+            for(var i=0;i<segs.length;i++){
+                var s = segs[i];
+                if(!cur.children[s]){ cur.children[s] = { children: {}, isFile: false, size: 0 }; }
+                // mark leaf as file
+                if(i === segs.length-1){ cur.children[s].isFile = true; cur.children[s].size = size; }
+                cur = cur.children[s];
+            }
+        });
+        function renderNode(node){
+            var html = '<ul class="list-unstyled ml-2">';
+            Object.keys(node.children).sort().forEach(function(name){
+                var n = node.children[name];
+                if(n.isFile && Object.keys(n.children).length === 0){
+                    html += '<li><span class="mdi mdi-file-outline mr-1"></span>' + name + ' <span class="text-muted">(' + Humanize.bytes(n.size||0, 1024) + ')</span></li>';
+                } else {
+                    html += '<li><span class="mdi mdi-folder-outline mr-1"></span>' + name;
+                    html += renderNode(n);
+                    html += '</li>';
+                }
+            });
+            html += '</ul>';
+            return html;
+        }
+        return renderNode(root);
     },
 
     // UI routes APIs
@@ -392,25 +541,23 @@ Distribyted.routes = {
         this._pages[route] = p + 1;
         this._renderRoutePage(route);
     },
-    _renderRoutePage: function(route){
-        var p = this._pages[route] || 1;
-        var size = 25;
-        fetch('/api/routes/' + encodeURIComponent(route) + '/torrents?page=' + p + '&size=' + size)
-            .then(function(response){ return response.json(); })
-            .then(function(data){
-                var tbody = document.getElementById('tbody-' + route);
-                var pageEl = document.getElementById('page-' + route);
-                var pager = document.getElementById('pager-' + route);
-                if(pageEl){ pageEl.textContent = data.page; }
-                if(!tbody){ return; }
-                var items = (data && Array.isArray(data.items)) ? data.items : [];
-                if (pager) {
-                    if (data && data.total > data.size) {
-                        pager.style.display = '';
-                    } else {
-                        pager.style.display = 'none';
-                    }
-                }
+	_renderRoutePage: function(route){
+		var p = this._pages[route] || 1;
+		var size = 25;
+		var self = this;
+		fetch('/api/routes/' + encodeURIComponent(route) + '/torrents?page=' + p + '&size=' + size)
+			.then(function(response){ return response.json(); })
+			.then(function(data){
+				var tbody = document.getElementById('tbody-' + route);
+				var pager = document.getElementById('pager-' + route);
+				if(!tbody){ return; }
+				var items = (data && Array.isArray(data.items)) ? data.items : [];
+				// Render/Update pagination
+				if (pager && data) {
+					var currentPage = Number(data.page) || p;
+					self._pages[route] = currentPage;
+					self._renderPager(route, currentPage, Number(data.size)||size, Number(data.total)||0);
+				}
                 // Diff and update rows in-place to avoid flashing
                 var desiredIds = new Set();
                 var toAppend = [];
@@ -536,35 +683,55 @@ Distribyted.routes = {
     // files list removed; torrents appear in the main table
 
     loadView: function () {
+        var self = this;
+        if (self._timer) { clearTimeout(self._timer); self._timer = null; }
         // Skip refresh if user is selecting/uploading files
-        if (this._isBusy()) {
+        if (self._isBusy()) {
+            self._timer = setTimeout(function(){ self.loadView(); }, Math.max(1000, self._interval * 1000));
             return;
         }
-        this._getTemplate()
+        self._getTemplate()
             .then(function(t){
                 if (!t) { return; }
-                return Promise.all([Distribyted.routes._getRoutesJson(), Distribyted.routes._getWatchInterval()])
+                return Promise.all([self._getRoutesJson(), self._getWatchInterval()])
                     .then(function(values){
-                        const routes = values[0] || [];
-                        if (Distribyted.routes._isBusy()) {
+                        var routes = values[0] || [];
+                        if (self._isBusy()) {
                             return;
                         }
                         var target = document.getElementById('template_target');
-                        if (target) {
-                            target.innerHTML = t({ routes: routes, interval: Distribyted.routes._interval });
-                            // Initialize first page render per route
+                        if (!target) { return; }
+                        var key = self._routeKey(routes);
+                        if (!self._mounted) {
+                            target.innerHTML = t({ routes: routes, interval: self._interval });
+                            self._mounted = true;
+                            self._lastRouteKey = key;
                             routes.forEach(function(r){
                                 if(!(r && r.name)) return;
-                                if (Distribyted.routes._pages[r.name] == null) {
-                                    Distribyted.routes._pages[r.name] = 1;
-                                }
-                                Distribyted.routes._renderRoutePage(r.name);
-                            })
+                                if (self._pages[r.name] == null) { self._pages[r.name] = 1; }
+                                self._renderRoutePage(r.name);
+                            });
+                        } else if (self._lastRouteKey !== key) {
+                            // Route set changed: re-render template once
+                            target.innerHTML = t({ routes: routes, interval: self._interval });
+                            self._lastRouteKey = key;
+                            routes.forEach(function(r){
+                                if(!(r && r.name)) return;
+                                if (self._pages[r.name] == null) { self._pages[r.name] = 1; }
+                                self._renderRoutePage(r.name);
+                            });
+                        } else {
+                            // Same routes: just update totals and refresh pages in place
+                            self._updateTotals(routes);
+                            routes.forEach(function(r){ if(r && r.name){ self._renderRoutePage(r.name); } });
                         }
                     })
             })
             .catch(function(err){
                 Distribyted.message.error('Error rendering routes: ' + (err && err.message ? err.message : err));
+            })
+            .finally(function(){
+                self._timer = setTimeout(function(){ self.loadView(); }, Math.max(1000, self._interval * 1000));
             });
     }
 }

@@ -38,8 +38,62 @@ var apiStatusHandler = func(fc *filecache.Cache, ss *torrent.Stats) gin.HandlerF
 // apiRoutesHandler returns route stats enriched with the on-disk folder path
 var apiRoutesHandler = func(ss *torrent.Stats, svc *torrent.Service) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		// Lightweight summaries (no per-piece stats)
+		// Lightweight summaries (no per-piece stats); if empty, use cached state
 		sums := ss.RouteSummaries()
+		if len(sums) == 0 {
+			// synthesize summaries from cached engine state
+			crs := svc.CachedRoutesStats()
+			type routeOut struct {
+				Name  string
+				Total int
+			}
+			ro := make([]*routeOut, 0, len(crs))
+			for _, r := range crs {
+				ro = append(ro, &routeOut{Name: r.Name, Total: len(r.TorrentStats)})
+			}
+			// enrich with folders and return
+			type outT struct {
+				Name, Folder string
+				Total        int
+			}
+			out := make([]*outT, 0, len(ro))
+			for _, r := range ro {
+				folder := ""
+				if f, err := svc.EnsureRouteFolder(r.Name); err == nil {
+					folder = f
+				}
+				out = append(out, &outT{Name: r.Name, Folder: folder, Total: r.Total})
+			}
+			ctx.JSON(http.StatusOK, out)
+			return
+		}
+		// Merge cached counts with live: use max(live, cached) to avoid shrinking totals
+		if len(sums) > 0 {
+			cm := make(map[string]int)
+			for _, r := range svc.CachedRoutesStats() {
+				cm[r.Name] = len(r.TorrentStats)
+			}
+			type routeOut struct {
+				Name   string `json:"name"`
+				Folder string `json:"folder"`
+				Total  int    `json:"total"`
+			}
+			out := make([]*routeOut, 0, len(sums))
+			for _, r := range sums {
+				folder := ""
+				if f, err := svc.EnsureRouteFolder(r.Name); err == nil {
+					folder = f
+				}
+				total := r.Total
+				if ct, ok := cm[r.Name]; ok && ct > total {
+					total = ct
+				}
+				out = append(out, &routeOut{Name: r.Name, Folder: folder, Total: total})
+			}
+			ctx.JSON(http.StatusOK, out)
+			return
+		}
+		// fallback shouldn't reach here, but keep original path
 		type routeOut struct {
 			Name   string `json:"name"`
 			Folder string `json:"folder"`
@@ -51,11 +105,7 @@ var apiRoutesHandler = func(ss *torrent.Stats, svc *torrent.Service) gin.Handler
 			if f, err := svc.EnsureRouteFolder(r.Name); err == nil {
 				folder = f
 			}
-			out = append(out, &routeOut{
-				Name:   r.Name,
-				Folder: folder,
-				Total:  r.Total,
-			})
+			out = append(out, &routeOut{Name: r.Name, Folder: folder, Total: r.Total})
 		}
 		ctx.JSON(http.StatusOK, out)
 	}
@@ -111,7 +161,7 @@ var apiBlacklistTorrentHandler = func(s *torrent.Service) gin.HandlerFunc {
 }
 
 // apiRouteTorrentsHandler returns paginated torrents for a route
-var apiRouteTorrentsHandler = func(ss *torrent.Stats) gin.HandlerFunc {
+var apiRouteTorrentsHandler = func(ss *torrent.Stats, svc *torrent.Service) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		route := ctx.Param("route")
 		page := 1
@@ -126,7 +176,8 @@ var apiRouteTorrentsHandler = func(ss *torrent.Stats) gin.HandlerFunc {
 				size = v
 			}
 		}
-		rp := ss.RouteStatsPage(route, page, size)
+		// Always serve a merged view so cached items persist until live torrents load
+		rp := svc.MergedRoutePage(route, page, size)
 		ctx.JSON(http.StatusOK, rp)
 	}
 }
@@ -139,8 +190,13 @@ var apiTorrentDetailsHandler = func(ss *torrent.Stats, svc *torrent.Service) gin
 
 		ts, err := ss.Stats(hash)
 		if err != nil {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
+			// Try cached stat to avoid 404 during startup
+			if cs := svc.CachedStat(hash); cs != nil {
+				ts = cs
+			} else {
+				ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
 		}
 
 		folder, _ := svc.EnsureRouteFolder(route)
@@ -160,6 +216,22 @@ var apiTorrentDetailsHandler = func(ss *torrent.Stats, svc *torrent.Service) gin
 				"fuse":   fusePath,
 			},
 		})
+	}
+}
+
+// apiTorrentFilesHandler returns the list of files for a torrent hash
+var apiTorrentFilesHandler = func(ss *torrent.Stats, svc *torrent.Service) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// route param is not strictly needed here, kept for consistency
+		_ = ctx.Param("route")
+		hash := ctx.Param("torrent_hash")
+		files, err := svc.FilesForHash(hash)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// files already contains { path, length }
+		ctx.JSON(http.StatusOK, gin.H{"files": files})
 	}
 }
 

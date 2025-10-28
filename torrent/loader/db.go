@@ -12,6 +12,8 @@ import (
 var _ LoaderAdder = &DB{}
 
 const routeRootKey = "/route/"
+const metaRootKey = "/meta/"
+const fileRootKey = "/file/"
 
 type DB struct {
 	db *badger.DB
@@ -104,7 +106,145 @@ func (l *DB) ListMagnets() (map[string][]string, error) {
 }
 
 func (l *DB) ListTorrentPaths() (map[string][]string, error) {
-	return nil, nil
+	tx := l.db.NewTransaction(false)
+	defer tx.Discard()
+
+	it := tx.NewIterator(badger.DefaultIteratorOptions)
+	defer it.Close()
+
+	prefix := []byte(fileRootKey)
+	out := make(map[string][]string)
+	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+		key := string(it.Item().Key())
+		// key format: /file/<hash>/<route>
+		// extract route
+		_, route := path.Split(key)
+		i := it.Item()
+		if err := i.Value(func(v []byte) error {
+			out[route] = append(out[route], string(v))
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// SetMeta stores JSON-encoded metadata by hash
+func (l *DB) SetMeta(hash string, meta []byte) error {
+	err := l.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(path.Join(metaRootKey, hash)), meta)
+	})
+	if err != nil {
+		return err
+	}
+	return l.db.Sync()
+}
+
+func (l *DB) GetMeta(hash string) ([]byte, error) {
+	var out []byte
+	err := l.db.View(func(txn *badger.Txn) error {
+		it, err := txn.Get([]byte(path.Join(metaRootKey, hash)))
+		if err != nil {
+			return err
+		}
+		return it.Value(func(v []byte) error {
+			out = append(out, v...)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetAllMeta returns a map of hash->raw JSON metadata
+func (l *DB) GetAllMeta() (map[string][]byte, error) {
+	tx := l.db.NewTransaction(false)
+	defer tx.Discard()
+	it := tx.NewIterator(badger.DefaultIteratorOptions)
+	defer it.Close()
+	out := make(map[string][]byte)
+	prefix := []byte(metaRootKey)
+	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+		key := string(it.Item().Key())
+		_, hash := path.Split(key)
+		i := it.Item()
+		if err := i.Value(func(v []byte) error {
+			// copy value
+			b := make([]byte, len(v))
+			copy(b, v)
+			out[hash] = b
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (l *DB) DeleteMeta(hash string) error {
+	return l.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete([]byte(path.Join(metaRootKey, hash)))
+	})
+}
+
+// AddTorrentFile stores an association of .torrent file for route and hash
+func (l *DB) AddTorrentFile(route, hash, filePath string) error {
+	err := l.db.Update(func(txn *badger.Txn) error {
+		rp := path.Join(fileRootKey, hash, route)
+		return txn.Set([]byte(rp), []byte(filePath))
+	})
+	if err != nil {
+		return err
+	}
+	return l.db.Sync()
+}
+
+func (l *DB) RemoveTorrentFile(route, hash string) error {
+	return l.db.Update(func(txn *badger.Txn) error {
+		rp := path.Join(fileRootKey, hash, route)
+		return txn.Delete([]byte(rp))
+	})
+}
+
+// ListMagnetHashesByRoute returns route->[]hash based on magnet entries
+func (l *DB) ListMagnetHashesByRoute() (map[string][]string, error) {
+	tx := l.db.NewTransaction(false)
+	defer tx.Discard()
+	it := tx.NewIterator(badger.DefaultIteratorOptions)
+	defer it.Close()
+	out := make(map[string][]string)
+	prefix := []byte(routeRootKey)
+	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+		key := string(it.Item().Key())
+		// key: /route/<hash>/<route>
+		_, route := path.Split(key)
+		parent := path.Dir(key)
+		_, hash := path.Split(parent)
+		out[route] = append(out[route], hash)
+	}
+	return out, nil
+}
+
+// ListFileHashesByRoute returns route->[]hash based on file entries
+func (l *DB) ListFileHashesByRoute() (map[string][]string, error) {
+	tx := l.db.NewTransaction(false)
+	defer tx.Discard()
+	it := tx.NewIterator(badger.DefaultIteratorOptions)
+	defer it.Close()
+	out := make(map[string][]string)
+	prefix := []byte(fileRootKey)
+	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+		key := string(it.Item().Key())
+		// key: /file/<hash>/<route>
+		_, route := path.Split(key)
+		parent := path.Dir(key)
+		_, hash := path.Split(parent)
+		out[route] = append(out[route], hash)
+	}
+	return out, nil
 }
 
 func (l *DB) Close() error {

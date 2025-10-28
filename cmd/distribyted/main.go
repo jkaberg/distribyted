@@ -169,11 +169,15 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 		return fmt.Errorf("error creating container fs: %w", err)
 	}
 	ts.SetContainerFs(cfs)
+	// Give service config handler early
+	ts.SetConfigHandler(ch)
 
-	// Preload saved UI state and start periodic persistence
-	ts.LoadState()
-	ts.StartStatePersistence()
+	// Preload UI metadata from DB (fast startup) and start periodic DB persistence
+	ts.LoadMetaFromDB()
+	ts.StartMetaPersistence()
 
+	// Pre-mount routes so FUSE/WebDAV/HTTPFS expose paths immediately
+	ts.PreAddRoutes()
 	// Load torrents and start watchers asynchronously to avoid delaying startup
 	var watchers, uiWatchers []*torrent.RouteWatcher
 	go func() {
@@ -210,8 +214,8 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 				log.Warn().Err(err).Msg("problem closing route watcher")
 			}
 		}
-		// removed: close served folders
-		ts.StopStatePersistence()
+		// stop periodic DB persistence and flush
+		ts.StopMetaPersistence()
 		log.Info().Msg("closing items database...")
 		fis.Close()
 		log.Info().Msg("closing magnet database...")
@@ -254,6 +258,8 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 
 	// Start health monitor if enabled
 	ts.StartHealthMonitor(conf.Health)
+
+	// removed: initial state dump
 
 	err = http.New(fc, ss, ts, ch, httpfs, logFilename, conf.HTTPGlobal)
 	log.Error().Err(err).Msg("error initializing HTTP server")

@@ -58,8 +58,9 @@ func New(fc *filecache.Cache, ss *torrent.Stats, s *torrent.Service, ch *config.
 		api.GET("/net", apiNetHandler(s))
 
 		api.GET("/routes", apiRoutesHandler(ss, s))
-		api.GET("/routes/:route/torrents", apiRouteTorrentsHandler(ss))
+		api.GET("/routes/:route/torrents", apiRouteTorrentsHandler(ss, s))
 		api.GET("/routes/:route/torrent/:torrent_hash", apiTorrentDetailsHandler(ss, s))
+		api.GET("/routes/:route/torrent/:torrent_hash/files", apiTorrentFilesHandler(ss, s))
 		api.POST("/routes", apiCreateRouteHandler(s))
 		api.DELETE("/routes/:route", apiDeleteRouteHandler(s))
 		api.GET("/routes/:route/files", apiListRouteFiles(s))

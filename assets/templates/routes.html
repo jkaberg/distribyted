@@ -1,19 +1,3 @@
-<style>
-    /* Compact route tables only */
-    .route-table thead th,
-    .route-table tbody td {
-        padding-top: .25rem;
-        padding-bottom: .25rem;
-    }
-    .route-table .progress {
-        margin-bottom: 0 !important;
-        height: 6px;
-    }
-    .route-table .mdi {
-        font-size: 16px;
-    }
-</style>
-
 <div class="row">
     <div class="col-12">
         <div class="card card-table-border-none">
@@ -38,7 +22,7 @@
     <div class="col-12">
         <div class="card card-table-border-none">
             <div class="card-header justify-content-between card-header-border-bottom">
-                <h2 title="{{folder}}">Route: {{name}}</h2>
+                <h2 title="{{folder}}">Route: {{name}} (<span id="total-{{name}}">{{total}}</span> torrents)</h2>
                 <div class="d-flex align-items-center">
                     <input type="file" accept=".torrent" id='file-{{name}}' style="display:none" onchange='Distribyted.routes.onFileSelected(event, "{{name}}")'>
                     <button type="button" class="btn btn-sm btn-primary btn-default mr-2" onclick='Distribyted.routes.triggerFileDialog("{{name}}")'>Upload .torrent</button>
@@ -63,11 +47,9 @@
                     <tfoot id="pager-{{name}}" style="display:none">
                         <tr>
                             <td colspan="5" class="text-right">
-                                <div class="btn-group btn-group-sm" role="group" aria-label="pager">
-                                    <button type="button" id="prev-{{name}}" class="btn btn-light" onclick='Distribyted.routes.pagePrev("{{name}}")'>Prev</button>
-                                    <span class="mx-2" id="page-{{name}}">1</span>
-                                    <button type="button" id="next-{{name}}" class="btn btn-light" onclick='Distribyted.routes.pageNext("{{name}}")'>Next</button>
-                                </div>
+                                <nav aria-label="pagination">
+                                    <ul id="pagination-{{name}}" class="pagination pagination-sm mb-0 justify-content-end"></ul>
+                                </nav>
                             </td>
                         </tr>
                     </tfoot>
@@ -78,3 +60,5 @@
 </div>
 
 {{/routes}}
+
+

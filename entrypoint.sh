@@ -27,7 +27,18 @@ fi
 mkdir -p /data /data/logs /config 2>/dev/null || true
 
 # Ensure ownership of directories is correct
-chown -R "$PUID:$PGID" /data /data /config
+# Avoid chown on FUSE mount path which can error (e.g., "Socket not connected")
+MOUNT_PATH="${FUSE_PATH:-/data/mount}"
+chown "$PUID:$PGID" /data /config 2>/dev/null || true
+if [ -d "/data" ]; then
+  for d in /data/*; do
+    [ "$d" = "$MOUNT_PATH" ] && continue
+    # Skip if glob didn't match
+    [ "$d" = "/data/*" ] && break
+    chown -R "$PUID:$PGID" "$d" 2>/dev/null || true
+  done
+fi
+chown -R "$PUID:$PGID" /config 2>/dev/null || true
 
 exec su-exec "$PUID:$PGID" "$@"
 

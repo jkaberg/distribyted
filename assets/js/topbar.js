@@ -18,7 +18,7 @@ Distribyted.topbar = (function(){
             var used = Humanize.bytes(stats.cacheFilled * 1024 * 1024, 1024);
             var total = Humanize.bytes(stats.cacheCapacity * 1024 * 1024, 1024);
             var el = document.getElementById('tb-cache-wrap');
-            if(el){ el.title = 'Cache used ' + used + ' / ' + total; }
+            if(el){ el.title = 'Cache available: ' + used + ' / ' + total; }
         }catch(e){}
     }
     function updateNet(net){
@@ -33,7 +33,7 @@ Distribyted.topbar = (function(){
         fetch('/api/status').then(function(r){ if(r.ok) return r.json();}).then(function(j){ if(j){ updateSpeeds(j); updateCache(j);} });
         fetch('/api/net').then(function(r){ if(r.ok) return r.json();}).then(function(j){ if(j){ updateNet(j);} });
     }
-    function start(){ tick(); setInterval(tick, 1000); }
+    function start(){ tick(); setInterval(tick, 2000); }
     return { start: start };
 })();
 
