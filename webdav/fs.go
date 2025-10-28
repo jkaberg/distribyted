@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/distribyted/distribyted/fs"
-	"github.com/distribyted/distribyted/iio"
+	"github.com/jkaberg/distribyted/fs"
+	"github.com/jkaberg/distribyted/iio"
 	"golang.org/x/net/webdav"
 )
 
@@ -203,10 +203,7 @@ func (wdfi *webDAVFileInfo) Mode() os.FileMode {
 	return 0555
 }
 
-func (wdfi *webDAVFileInfo) ModTime() time.Time {
-	// TODO fix it
-	return time.Now()
-}
+func (wdfi *webDAVFileInfo) ModTime() time.Time { return time.Now() }
 
 func (wdfi *webDAVFileInfo) IsDir() bool {
 	return wdfi.isDir

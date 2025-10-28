@@ -13,8 +13,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/time/rate"
 
-	"github.com/distribyted/distribyted/config"
-	dlog "github.com/distribyted/distribyted/log"
+	"github.com/jkaberg/distribyted/config"
+	dlog "github.com/jkaberg/distribyted/log"
 )
 
 func NewClient(st storage.ClientImpl, fis bep44.Store, cfg *config.TorrentGlobal, id [20]byte) (*torrent.Client, *rate.Limiter, *rate.Limiter, error) {

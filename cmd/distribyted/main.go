@@ -15,14 +15,16 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
 
-	"github.com/distribyted/distribyted/config"
-	"github.com/distribyted/distribyted/fs"
-	"github.com/distribyted/distribyted/fuse"
-	"github.com/distribyted/distribyted/http"
-	dlog "github.com/distribyted/distribyted/log"
-	"github.com/distribyted/distribyted/torrent"
-	"github.com/distribyted/distribyted/torrent/loader"
-	"github.com/distribyted/distribyted/webdav"
+	"github.com/jkaberg/distribyted/config"
+	"github.com/jkaberg/distribyted/fs"
+	"github.com/jkaberg/distribyted/fuse"
+
+	// http server is started via server.StartServers
+	dlog "github.com/jkaberg/distribyted/log"
+	"github.com/jkaberg/distribyted/server"
+	"github.com/jkaberg/distribyted/torrent"
+	"github.com/jkaberg/distribyted/torrent/loader"
+	"github.com/jkaberg/distribyted/torrent/watchers"
 )
 
 const (
@@ -141,7 +143,7 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 		return fmt.Errorf("error creating routes root: %w", err)
 	}
 
-	ts := torrent.NewService([]loader.Loader{cl, fl}, dbl, ss, c,
+	ts := torrent.NewService([]loader.Loader{cl, fl}, torrent.NewIndexFromLoader(dbl), ss, c,
 		conf.Torrent.AddTimeout,
 		conf.Torrent.ReadTimeout,
 		conf.Torrent.ContinueWhenAddTimeout,
@@ -179,7 +181,7 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 	// Pre-mount routes so FUSE/WebDAV/HTTPFS expose paths immediately
 	ts.PreAddRoutes()
 	// Load torrents and start watchers asynchronously to avoid delaying startup
-	var watchers, uiWatchers []*torrent.RouteWatcher
+	var routeWatchers, uiWatchers []*watchers.RouteWatcher
 	go func() {
 		log.Info().Msg("loading torrents in background...")
 		if _, e := ts.Load(); e != nil {
@@ -187,12 +189,12 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 		}
 		// Start route watchers for dynamic loading from configured torrent folders
 		var wErr error
-		watchers, wErr = torrent.StartRouteWatchers(ts, conf.Routes)
+		routeWatchers, wErr = watchers.StartRouteWatchers(ts, conf.Routes)
 		if wErr != nil {
 			log.Error().Err(wErr).Msg("error starting route watchers")
 		}
 		// Also start watchers for UI-managed routes under routesRoot
-		uiWatchers, wErr = torrent.StartRouteWatchersFromRoot(ts, routesRoot)
+		uiWatchers, wErr = watchers.StartRouteWatchersFromRoot(ts, routesRoot)
 		if wErr != nil {
 			log.Error().Err(wErr).Msg("error starting UI route watchers")
 		}
@@ -204,7 +206,7 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 	go func() {
 		<-sigChan
 		log.Info().Msg("closing route watchers...")
-		for _, w := range watchers {
+		for _, w := range routeWatchers {
 			if err := w.Close(); err != nil {
 				log.Warn().Err(err).Msg("problem closing route watcher")
 			}
@@ -241,27 +243,16 @@ func load(configPath string, port, webDAVPort int, fuseAllowOther bool) error {
 		}
 	}()
 
-	go func() {
-		if conf.WebDAV != nil {
-			port = webDAVPort
-			if port == 0 {
-				port = conf.WebDAV.Port
-			}
-
-			if err := webdav.NewWebDAVServer(cfs, port, conf.WebDAV.User, conf.WebDAV.Pass); err != nil {
-				log.Error().Err(err).Msg("error starting webDAV")
-			}
-		}
-
-		log.Warn().Msg("webDAV configuration not found!")
-	}()
-
 	// Start health monitor if enabled
 	ts.StartHealthMonitor(conf.Health)
 
-	// removed: initial state dump
-
-	err = http.New(fc, ss, ts, ch, httpfs, logFilename, conf.HTTPGlobal)
+	// Respect override of webdav-port flag
+	if conf.WebDAV != nil && webDAVPort != 0 {
+		conf.WebDAV.Port = webDAVPort
+	}
+	err = server.StartServers(fc, cfs, conf.HTTPGlobal, conf.WebDAV, ss, ts, ch, httpfs, logFilename)
+	// Attach overlays after servers started to avoid delaying mount/startup
+	go ts.AttachOverlays()
 	log.Error().Err(err).Msg("error initializing HTTP server")
 	return err
 }

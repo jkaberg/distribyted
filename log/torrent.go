@@ -37,7 +37,5 @@ func (l *Torrent) Handle(r log.Record) {
 		e = l.L.Warn().Str("error-type", "critical")
 	}
 
-	// TODO set log values somehow
-
 	e.Msgf(r.Text())
 }

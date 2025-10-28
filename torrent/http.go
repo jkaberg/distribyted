@@ -7,8 +7,8 @@ import (
 	"os"
 	"sync"
 
-	dfs "github.com/distribyted/distribyted/fs"
-	"github.com/distribyted/distribyted/iio"
+	dfs "github.com/jkaberg/distribyted/fs"
+	"github.com/jkaberg/distribyted/iio"
 )
 
 var _ http.FileSystem = &HTTPFS{}

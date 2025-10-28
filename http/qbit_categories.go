@@ -3,8 +3,8 @@ package http
 import (
 	"net/http"
 
-	"github.com/distribyted/distribyted/torrent"
 	"github.com/gin-gonic/gin"
+	"github.com/jkaberg/distribyted/torrent"
 )
 
 // categories list maps routes to qBittorrent categories format

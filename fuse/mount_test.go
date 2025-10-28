@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/distribyted/distribyted/fs"
+	"github.com/jkaberg/distribyted/fs"
 	"github.com/stretchr/testify/require"
 )
 

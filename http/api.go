@@ -18,14 +18,13 @@ import (
 	"time"
 
 	"github.com/anacrolix/missinggo/v2/filecache"
-	cfgpkg "github.com/distribyted/distribyted/config"
-	"github.com/distribyted/distribyted/torrent"
 	"github.com/gin-gonic/gin"
+	cfgpkg "github.com/jkaberg/distribyted/config"
+	"github.com/jkaberg/distribyted/torrent"
 )
 
 var apiStatusHandler = func(fc *filecache.Cache, ss *torrent.Stats) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		// TODO move to a struct
 		ctx.JSON(http.StatusOK, gin.H{
 			"cacheItems":    fc.Info().NumItems,
 			"cacheFilled":   fc.Info().Filled / 1024 / 1024,

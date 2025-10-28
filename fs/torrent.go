@@ -9,7 +9,7 @@ import (
 
 	"github.com/anacrolix/missinggo/v2"
 	"github.com/anacrolix/torrent"
-	"github.com/distribyted/distribyted/iio"
+	"github.com/jkaberg/distribyted/iio"
 )
 
 var _ Filesystem = &Torrent{}
@@ -22,6 +22,8 @@ type Torrent struct {
 	readTimeout int
 	poolSize    int
 	readahead   int64
+	// registered tracks torrents already registered into storage by hash
+	registered map[string]bool
 }
 
 func NewTorrent(readTimeout int) *Torrent {
@@ -31,6 +33,7 @@ func NewTorrent(readTimeout int) *Torrent {
 		readTimeout: readTimeout,
 		poolSize:    4,
 		readahead:   2 * 1024 * 1024,
+		registered:  make(map[string]bool),
 	}
 }
 
@@ -68,17 +71,20 @@ func (fs *Torrent) RemoveTorrent(h string) {
 	fs.loaded = false
 
 	delete(fs.ts, h)
+	delete(fs.registered, h)
 }
 
 func (fs *Torrent) load() {
-	if fs.loaded {
-		return
-	}
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	for _, t := range fs.ts {
-		<-t.GotInfo()
+	for h, t := range fs.ts {
+		if fs.registered[h] {
+			continue
+		}
+		if t.Info() == nil {
+			continue
+		}
 
 		files := t.Files()
 		wrapInRoot := len(files) == 1
@@ -88,7 +94,7 @@ func (fs *Torrent) load() {
 		}
 
 		for _, file := range files {
-			fs.s.Add(&torrentFile{
+			_ = fs.s.Add(&torrentFile{
 				readerFunc:     file.NewReader,
 				len:            file.Length(),
 				timeout:        fs.readTimeout,
@@ -102,9 +108,8 @@ func (fs *Torrent) load() {
 				return p
 			}())
 		}
+		fs.registered[h] = true
 	}
-
-	fs.loaded = true
 }
 
 func (fs *Torrent) Open(filename string) (File, error) {

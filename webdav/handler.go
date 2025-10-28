@@ -3,7 +3,7 @@ package webdav
 import (
 	"net/http"
 
-	"github.com/distribyted/distribyted/fs"
+	"github.com/jkaberg/distribyted/fs"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/webdav"
 )

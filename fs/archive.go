@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/bodgit/sevenzip"
-	"github.com/distribyted/distribyted/iio"
+	"github.com/jkaberg/distribyted/iio"
 	"github.com/nwaples/rardecode/v2"
 )
 

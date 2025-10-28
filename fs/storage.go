@@ -28,6 +28,9 @@ type storage struct {
 	files       map[string]File
 	filesystems map[string]Filesystem
 	children    map[string]map[string]File
+
+	// cache of filesystem mount prefixes sorted longest-first for faster lookup
+	mounts []string
 }
 
 func newStorage(factories map[string]FsFactory) *storage {
@@ -43,6 +46,7 @@ func (s *storage) Clear() {
 	s.files = make(map[string]File)
 	s.children = make(map[string]map[string]File)
 	s.filesystems = make(map[string]Filesystem)
+	s.mounts = nil
 
 	s.Add(&Dir{}, "/")
 }
@@ -75,6 +79,7 @@ func (s *storage) AddFS(fs Filesystem, p string) error {
 	}
 
 	s.filesystems[p] = fs
+	s.refreshMounts()
 	return s.createParent(p, &Dir{})
 }
 
@@ -83,6 +88,7 @@ func (s *storage) AddFS(fs Filesystem, p string) error {
 func (s *storage) RemoveFS(p string) error {
 	p = clean(p)
 	delete(s.filesystems, p)
+	s.refreshMounts()
 	base, filename := path.Split(p)
 	base = clean(base)
 	if ch, ok := s.children[base]; ok {
@@ -195,10 +201,9 @@ func (s *storage) Get(path string) (File, error) {
 }
 
 func (s *storage) getFileFromFs(p string) (File, error) {
-	for fsp, fs := range s.filesystems {
+	for _, fsp := range s.mounts {
 		if strings.HasPrefix(p, fsp) {
-			// If querying the mount path itself, present it as a directory to
-			// allow stat() and ls -l to succeed before underlying FS is ready.
+			fs := s.filesystems[fsp]
 			if p == fsp {
 				return &Dir{}, nil
 			}
@@ -210,8 +215,9 @@ func (s *storage) getFileFromFs(p string) (File, error) {
 }
 
 func (s *storage) getDirFromFs(p string) (map[string]File, error) {
-	for fsp, fs := range s.filesystems {
+	for _, fsp := range s.mounts {
 		if strings.HasPrefix(p, fsp) {
+			fs := s.filesystems[fsp]
 			path := strings.TrimPrefix(p, fsp)
 			return fs.ReadDir(path)
 		}
@@ -222,4 +228,19 @@ func (s *storage) getDirFromFs(p string) (map[string]File, error) {
 
 func clean(p string) string {
 	return path.Clean(separator + strings.ReplaceAll(p, "\\", "/"))
+}
+
+func (s *storage) refreshMounts() {
+	s.mounts = s.mounts[:0]
+	for k := range s.filesystems {
+		s.mounts = append(s.mounts, k)
+	}
+	// sort longest-first so longest prefix matches first
+	for i := 0; i < len(s.mounts)-1; i++ {
+		for j := i + 1; j < len(s.mounts); j++ {
+			if len(s.mounts[i]) < len(s.mounts[j]) {
+				s.mounts[i], s.mounts[j] = s.mounts[j], s.mounts[i]
+			}
+		}
+	}
 }

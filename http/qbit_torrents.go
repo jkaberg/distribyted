@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/distribyted/distribyted/torrent"
 	"github.com/gin-gonic/gin"
+	"github.com/jkaberg/distribyted/torrent"
 )
 
 // qBittorrent torrent info DTO (subset Arr uses)

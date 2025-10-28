@@ -6,9 +6,10 @@ import (
 	"math"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/billziss-gh/cgofuse/fuse"
-	"github.com/distribyted/distribyted/fs"
+	"github.com/jkaberg/distribyted/fs"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -50,6 +51,10 @@ func (fs *FS) Opendir(path string) (errc int, fh uint64) {
 func (fs *FS) Getattr(path string, stat *fuse.Stat_t, fh uint64) (errc int) {
 	if path == "/" {
 		stat.Mode = fuse.S_IFDIR | 0555
+		now := time.Now().Unix()
+		stat.Mtim.Sec = now
+		stat.Atim.Sec = now
+		stat.Ctim.Sec = now
 		return 0
 	}
 
@@ -72,6 +77,14 @@ func (fs *FS) Getattr(path string, stat *fuse.Stat_t, fh uint64) (errc int) {
 		stat.Mode = fuse.S_IFREG | 0444
 		stat.Size = file.Size()
 	}
+
+	// Set timestamps to a sane value (now). We don't track mtime per file in
+	// the virtual listing overlay; when the real file is opened via BaseFS, the
+	// size is authoritative for clients.
+	now := time.Now().Unix()
+	stat.Mtim.Sec = now
+	stat.Atim.Sec = now
+	stat.Ctim.Sec = now
 
 	return 0
 }

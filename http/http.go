@@ -9,9 +9,10 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/shurcooL/httpfs/html/vfstemplate"
 
-	"github.com/distribyted/distribyted"
-	"github.com/distribyted/distribyted/config"
-	"github.com/distribyted/distribyted/torrent"
+	"github.com/jkaberg/distribyted"
+	"github.com/jkaberg/distribyted/config"
+	"github.com/jkaberg/distribyted/torrent"
+	"github.com/jkaberg/distribyted/torrent/watchers"
 )
 
 func New(fc *filecache.Cache, ss *torrent.Stats, s *torrent.Service, ch *config.Handler, fs http.FileSystem, logPath string, cfg *config.HTTPGlobal) error {
@@ -73,7 +74,7 @@ func New(fc *filecache.Cache, ss *torrent.Stats, s *torrent.Service, ch *config.
 
 		// watcher interval endpoints
 		api.GET("/watch_interval", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{"interval": s.WatchInterval()})
+			c.JSON(http.StatusOK, gin.H{"interval": watchers.GetWatchInterval()})
 		})
 		api.POST("/watch_interval", func(c *gin.Context) {
 			var req struct {
@@ -83,8 +84,8 @@ func New(fc *filecache.Cache, ss *torrent.Stats, s *torrent.Service, ch *config.
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			s.SetWatchInterval(req.Interval)
-			c.JSON(http.StatusOK, gin.H{"interval": s.WatchInterval()})
+			watchers.SetWatchInterval(req.Interval)
+			c.JSON(http.StatusOK, gin.H{"interval": watchers.GetWatchInterval()})
 		})
 
 		// rate limit endpoints (Mbit/s)

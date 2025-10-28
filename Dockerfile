@@ -5,7 +5,7 @@
 #===============
 FROM golang:1.21-alpine AS builder
 
-RUN apk add --no-cache fuse-dev gcc g++ musl-dev make git
+RUN apk add --no-cache fuse-dev gcc g++ musl-dev git
 
 WORKDIR /app
 
@@ -18,9 +18,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY . .
 
 # Build with cache mounts
+ENV CGO_ENABLED=1
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    BIN_OUTPUT=/bin/distribyted make build
+    go build -trimpath -ldflags "-s -w" -o /bin/distribyted ./cmd/distribyted
 
 #===============
 # Stage 2: Run

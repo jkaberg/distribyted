@@ -7,7 +7,7 @@ import (
 
 	"github.com/anacrolix/dht/v2/bep44"
 	"github.com/dgraph-io/badger/v3"
-	dlog "github.com/distribyted/distribyted/log"
+	dlog "github.com/jkaberg/distribyted/log"
 	"github.com/rs/zerolog/log"
 )
 

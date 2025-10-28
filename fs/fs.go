@@ -4,7 +4,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/distribyted/distribyted/iio"
+	"github.com/jkaberg/distribyted/iio"
 )
 
 type File interface {
@@ -55,10 +55,7 @@ func (fi *fileInfo) Mode() os.FileMode {
 	return 0555
 }
 
-func (fi *fileInfo) ModTime() time.Time {
-	// TODO fix it
-	return time.Now()
-}
+func (fi *fileInfo) ModTime() time.Time { return time.Now() }
 
 func (fi *fileInfo) IsDir() bool {
 	return fi.isDir

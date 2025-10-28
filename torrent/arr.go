@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	cfgpkg "github.com/distribyted/distribyted/config"
+	cfgpkg "github.com/jkaberg/distribyted/config"
 )
 
 type arrClient struct {

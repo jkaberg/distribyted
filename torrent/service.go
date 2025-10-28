@@ -23,9 +23,10 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/time/rate"
 
-	cfgpkg "github.com/distribyted/distribyted/config"
-	"github.com/distribyted/distribyted/fs"
-	"github.com/distribyted/distribyted/torrent/loader"
+	cfgpkg "github.com/jkaberg/distribyted/config"
+	"github.com/jkaberg/distribyted/fs"
+	"github.com/jkaberg/distribyted/torrent/loader"
+	"github.com/jkaberg/distribyted/torrent/watchers"
 )
 
 type Service struct {
@@ -37,7 +38,7 @@ type Service struct {
 	fss map[string]fs.Filesystem
 
 	loaders []loader.Loader
-	db      loader.LoaderAdder
+	db      IndexStore
 
 	log                     zerolog.Logger
 	addTimeout, readTimeout int
@@ -50,15 +51,12 @@ type Service struct {
 	// corresponding torrent info hash for dynamic folder watching.
 	pathToHash map[string]string
 
-	// watchIntervalSec is the debounce interval in seconds used by folder watchers.
-	watchIntervalSec int
-
 	// routesRoot is the base directory where UI-managed routes are stored as
 	// <routesRoot>/<route> containing .torrent files.
 	routesRoot string
 
 	// watchers holds active fsnotify watchers per route for UI-managed routes.
-	watchers map[string]*RouteWatcher
+	watchers map[string]*watchers.RouteWatcher
 
 	// cfs is the container filesystem used by HTTPFS/WebDAV. We add mounts
 	// here so new routes appear immediately without restart.
@@ -68,7 +66,6 @@ type Service struct {
 	dl *rate.Limiter
 	ul *rate.Limiter
 
-	// config handler for persistence
 	ch *cfgpkg.Handler
 
 	// health monitor
@@ -85,9 +82,16 @@ type Service struct {
 
 	// stop channel for background DB metadata persistence
 	metaPersistStop chan struct{}
+
+	// tracks whether we've loaded torrents for a route from DB/config
+	routeLoaded map[string]bool
+
+	// DB index caches for quick materialization
+	routeMagnet map[string]map[string]string // route->hash->magnet
+	routeFile   map[string]map[string]string // route->hash->torrent file path
 }
 
-func NewService(loaders []loader.Loader, db loader.LoaderAdder, stats *Stats, c *torrent.Client, addTimeout, readTimeout int, continueWhenAddTimeout bool, routesRoot string) *Service {
+func NewService(loaders []loader.Loader, db IndexStore, stats *Stats, c *torrent.Client, addTimeout, readTimeout int, continueWhenAddTimeout bool, routesRoot string) *Service {
 	l := log.Logger.With().Str("component", "torrent-service").Logger()
 	return &Service{
 		log:                    l,
@@ -100,13 +104,15 @@ func NewService(loaders []loader.Loader, db loader.LoaderAdder, stats *Stats, c 
 		readTimeout:            readTimeout,
 		continueWhenAddTimeout: continueWhenAddTimeout,
 		pathToHash:             make(map[string]string),
-		watchIntervalSec:       5,
 		routesRoot:             routesRoot,
-		watchers:               make(map[string]*RouteWatcher),
+		watchers:               make(map[string]*watchers.RouteWatcher),
 		readerPoolSize:         4,
 		readaheadMB:            2,
 		cached:                 make(map[string]*cachedState),
 		metaPersistStop:        make(chan struct{}),
+		routeLoaded:            make(map[string]bool),
+		routeMagnet:            make(map[string]map[string]string),
+		routeFile:              make(map[string]map[string]string),
 	}
 }
 
@@ -276,147 +282,127 @@ func (s *Service) PreAddRoutes() {
 		}
 	}
 
-	// Mount overlay over each route to expose cached DB listings without
-	// affecting file opens. The base torrent FS remains the source of truth.
+	// Defer overlay attach until after servers start
+}
+
+// AttachOverlays mounts overlays over base filesystems. Call this after servers start.
+func (s *Service) AttachOverlays() {
 	s.mu.Lock()
-	// snapshot caches and current route filesystems
 	cached := make(map[string]*cachedState)
 	for h, v := range s.cached {
 		cached[h] = v
 	}
-	// Build per-route file and directory size indexes from cached summaries. We always expose a
-	// top-level folder per torrent named after torrent.Name, and place files
-	// under that folder so both single-file and multi-file torrents live in
-	// their own subdirectory.
-	toFile := func(sz int64) fs.File { return fs.NewInfoFile(sz) }
-
-	routeFiles := make(map[string]map[string]fs.File) // path -> placeholder file (InfoFile or InfoDir)
-	routeDirSize := make(map[string]map[string]int64) // dirPath -> aggregate size
-	for _, st := range cached {
-		r := st.summary.Route
-		name := st.summary.Name
-		if r == "" || name == "" {
-			continue
-		}
-		if routeFiles[r] == nil {
-			routeFiles[r] = make(map[string]fs.File)
-		}
-		if routeDirSize[r] == nil {
-			routeDirSize[r] = make(map[string]int64)
-		}
-		// Add files under the torrent root folder and accumulate dir sizes
-		if len(st.summary.Files) > 0 {
-			for _, f := range st.summary.Files {
-				rp := path.Join(name, f.Path)
-				routeFiles[r][rp] = toFile(f.Length)
-				// accumulate into all ancestor directories
-				d := rp
-				for {
-					d = path.Dir(d)
-					if d == "." || d == "/" {
-						break
-					}
-					routeDirSize[r][d] += f.Length
-				}
-			}
-		}
-		// Ensure the torrent root folder exists with aggregate size
-		total := routeDirSize[r][name]
-		if total == 0 {
-			// fallback to cached SizeBytes or piece estimate
-			if st.summary.SizeBytes > 0 {
-				total = st.summary.SizeBytes
-			} else if st.summary.PieceBytes > 0 && st.summary.TotalPieces > 0 {
-				total = int64(st.summary.PieceBytes) * int64(st.summary.TotalPieces)
-			}
-		}
-		routeFiles[r][name] = fs.NewInfoDir(total)
-	}
-
-	// Wrap existing route FSs with overlay
-	for mount, base := range s.fss {
-		// mount looks like "/<route>"
-		_, route := path.Split(mount)
-		files := routeFiles[route]
-		if len(files) == 0 {
-			continue
-		}
-		dirSize := routeDirSize[route]
-		lister := func(prefix string) (map[string]fs.File, error) {
-			// Convert cached logical tree into storage-like map for the prefix
-			// We only inject immediate children under the requested directory.
-			out := make(map[string]fs.File)
-			basePrefix := strings.TrimPrefix(prefix, "/")
-			for p, f := range files {
-				// p is a relative path under the route
-				// If prefix is "/" map first component; else match exact parent
-				if basePrefix == "" {
-					// inject top-level names
-					if i := strings.Index(p, string(os.PathSeparator)); i >= 0 {
-						name := p[:i]
-						if _, exists := out[name]; !exists {
-							// use aggregated size for this directory
-							out[name] = fs.NewInfoDir(dirSize[name])
-						}
-					} else {
-						out[p] = f
-					}
-				} else {
-					// only inject children directly under prefix
-					if strings.HasPrefix(p+string(os.PathSeparator), basePrefix+string(os.PathSeparator)) {
-						rest := strings.TrimPrefix(p, basePrefix+string(os.PathSeparator))
-						if rest == p { // not under prefix
-							continue
-						}
-						if j := strings.Index(rest, string(os.PathSeparator)); j >= 0 {
-							name := rest[:j]
-							if _, exists := out[name]; !exists {
-								// aggregated size for nested dir
-								sub := path.Join(basePrefix, name)
-								out[name] = fs.NewInfoDir(dirSize[sub])
-							}
-						} else if rest != "" {
-							out[rest] = f
-						}
-					}
-				}
-			}
-			return out, nil
-		}
-		s.fss[mount] = fs.NewOverlay(base, lister)
-		if s.cfs != nil {
-			_ = s.cfs.RemoveFS(mount)
-			_ = s.cfs.AddFS(s.fss[mount], mount)
-		}
-	}
+	cfs := s.cfs
 	s.mu.Unlock()
+	if cfs == nil {
+		return
+	}
+	perRoute := buildOverlayIndexes(cached)
+	for mount, base := range s.fss {
+		_, route := path.Split(mount)
+		idx := perRoute[route]
+		if idx == nil || len(idx.files) == 0 {
+			continue
+		}
+		var mat func(string) error
+		s.mu.Lock()
+		if s.routeLoaded[route] {
+			mat = s.materializer(route)
+		}
+		s.mu.Unlock()
+		overlay := fs.NewOverlayWithMaterializer(base, routeLister(idx), mat)
+		_ = cfs.RemoveFS(mount)
+		_ = cfs.AddFS(overlay, mount)
+	}
 }
 
 func (s *Service) load(l loader.Loader) error {
-	list, err := l.ListMagnets()
-	if err != nil {
-		return err
-	}
-	for r, ms := range list {
-		s.addRoute(r)
-		for _, m := range ms {
-			if err := s.addMagnet(r, m); err != nil {
-				return err
+	// Concurrency-limited worker pool for adding torrents
+	runWithConcurrency := func(concurrency int, jobs int, fn func(idx int) error) error {
+		if concurrency <= 0 {
+			concurrency = 16
+		}
+		if jobs == 0 {
+			return nil
+		}
+		type res struct{ err error }
+		sem := make(chan struct{}, concurrency)
+		done := make(chan res, jobs)
+		for i := 0; i < jobs; i++ {
+			sem <- struct{}{}
+			go func(k int) {
+				defer func() { <-sem }()
+				done <- res{err: fn(k)}
+			}(i)
+		}
+		var firstErr error
+		for i := 0; i < jobs; i++ {
+			r := <-done
+			if r.err != nil && firstErr == nil {
+				firstErr = r.err
 			}
 		}
+		return firstErr
 	}
 
-	list, err = l.ListTorrentPaths()
+	// Magnets
+	mlist, err := l.ListMagnets()
 	if err != nil {
 		return err
 	}
-	for r, ms := range list {
+	for r, ms := range mlist {
 		s.addRoute(r)
-		for _, p := range ms {
-			if err := s.addTorrentPath(r, p); err != nil {
+		rr := r
+		arr := ms
+		// index magnets by hash for on-demand materialization
+		s.mu.Lock()
+		if s.routeMagnet[rr] == nil {
+			s.routeMagnet[rr] = make(map[string]string)
+		}
+		s.mu.Unlock()
+		_ = runWithConcurrency(16, len(arr), func(i int) error {
+			if err := s.addMagnet(rr, arr[i]); err != nil {
 				return err
 			}
+			// store mapping
+			if spec, e := metainfo.ParseMagnetUri(arr[i]); e == nil {
+				s.mu.Lock()
+				s.routeMagnet[rr][spec.InfoHash.HexString()] = arr[i]
+				s.mu.Unlock()
+			}
+			return nil
+		})
+		s.mu.Lock()
+		s.routeLoaded[rr] = true
+		s.mu.Unlock()
+	}
+
+	// Torrent files
+	flist, err := l.ListTorrentPaths()
+	if err != nil {
+		return err
+	}
+	for r, ps := range flist {
+		s.addRoute(r)
+		rr := r
+		arr := ps
+		s.mu.Lock()
+		if s.routeFile[rr] == nil {
+			s.routeFile[rr] = make(map[string]string)
 		}
+		s.mu.Unlock()
+		_ = runWithConcurrency(16, len(arr), func(i int) error {
+			h, err := s.AddTorrentPath(rr, arr[i])
+			if err == nil {
+				s.mu.Lock()
+				s.routeFile[rr][h] = arr[i]
+				s.mu.Unlock()
+			}
+			return err
+		})
+		s.mu.Lock()
+		s.routeLoaded[rr] = true
+		s.mu.Unlock()
 	}
 
 	return nil
@@ -431,15 +417,7 @@ func (s *Service) AddMagnet(r, m string) error {
 	return s.db.AddMagnet(r, m)
 }
 
-func (s *Service) addTorrentPath(r, p string) error {
-	// Add to client
-	t, err := s.c.AddTorrentFromFile(p)
-	if err != nil {
-		return err
-	}
-
-	return s.addTorrent(r, t)
-}
+// addTorrentPath is unused; use AddTorrentPath which returns hash and indexes mapping
 
 // AddTorrentPath adds a torrent from a .torrent file into the given route and
 // returns the new torrent hash. This does not persist anything into the DB.
@@ -733,23 +711,7 @@ func (s *Service) FilesForHash(hash string) ([]fileSummary, error) {
 	return nil, fmt.Errorf("unknown torrent or files unavailable")
 }
 
-// WatchInterval returns the current debounce interval in seconds used by the
-// folder watchers.
-func (s *Service) WatchInterval() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.watchIntervalSec
-}
-
-// SetWatchInterval updates the debounce interval used by the folder watchers.
-func (s *Service) SetWatchInterval(interval int) {
-	if interval <= 0 {
-		return
-	}
-	s.mu.Lock()
-	s.watchIntervalSec = interval
-	s.mu.Unlock()
-}
+// Watch interval is now managed by watchers.Manager; service no longer owns it.
 
 // SyncRouteFolder reconciles torrents in a route's folder with the current runtime state.
 // It loads new .torrent files and unloads torrents whose files were removed.
@@ -853,7 +815,7 @@ func (s *Service) StartWatcherForRoute(route string) error {
 	}
 	s.mu.Unlock()
 
-	rw, err := NewRouteWatcher(s, route, folder)
+	rw, err := watchers.NewRouteWatcher(s, route, folder)
 	if err != nil {
 		return err
 	}
@@ -937,23 +899,7 @@ func (s *Service) DeleteRoute(route string) error {
 	return nil
 }
 
-func (s *Service) SetConfigHandler(ch *cfgpkg.Handler) {
-	s.mu.Lock()
-	s.ch = ch
-	s.mu.Unlock()
-}
-
-// StartStatePersistence periodically dumps torrent summaries to disk for fast startup
-// StartStatePersistence removed: state.json no longer used
-// func (s *Service) StartStatePersistence() {}
-
-// StopStatePersistence stops background persistence and performs a final dump
-// StopStatePersistence removed: state.json no longer used
-// func (s *Service) StopStatePersistence() {}
-
-// PersistStateOnce forces a one-off state dump to disk
-// PersistStateOnce removed
-// func (s *Service) PersistStateOnce() error { return nil }
+func (s *Service) SetConfigHandler(ch *cfgpkg.Handler) { s.mu.Lock(); s.ch = ch; s.mu.Unlock() }
 
 type summary struct {
 	Hash       string        `json:"hash"`

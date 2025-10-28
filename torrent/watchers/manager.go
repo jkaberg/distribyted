@@ -1,4 +1,4 @@
-package torrent
+package watchers
 
 import (
 	"os"
@@ -9,19 +9,35 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/rs/zerolog/log"
 
-	"github.com/distribyted/distribyted/config"
+	"github.com/jkaberg/distribyted/config"
 )
+
+// ServiceFacade captures the minimal API needed by watchers from the Service.
+type ServiceFacade interface {
+	SyncRouteFolder(route, folder string) error
+}
+
+// global watch interval in seconds, adjustable at runtime
+var watchIntervalSec int32 = 5
+
+func GetWatchInterval() int { return int(atomic.LoadInt32(&watchIntervalSec)) }
+func SetWatchInterval(interval int) {
+	if interval <= 0 {
+		return
+	}
+	atomic.StoreInt32(&watchIntervalSec, int32(interval))
+}
 
 type RouteWatcher struct {
 	route  string
 	folder string
 	w      *fsnotify.Watcher
-	s      *Service
+	s      ServiceFacade
 
 	eventsCount uint64
 }
 
-func NewRouteWatcher(s *Service, route, folder string) (*RouteWatcher, error) {
+func NewRouteWatcher(s ServiceFacade, route, folder string) (*RouteWatcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -77,13 +93,14 @@ func (rw *RouteWatcher) Start() error {
 				if !ok {
 					return
 				}
-				log.Error().Err(err).Str("route", rw.route).Str("folder", rw.folder).Msg("watcher error")
+				log.Error().Err(err).Msg("watcher error")
 			}
 		}
 	}()
 
 	go func() {
-		for range time.Tick(time.Duration(rw.s.WatchInterval()) * time.Second) {
+		for {
+			time.Sleep(time.Duration(GetWatchInterval()) * time.Second)
 			if rw.eventsCount == 0 {
 				continue
 			}
@@ -108,7 +125,7 @@ func (rw *RouteWatcher) Close() error {
 
 // StartRouteWatchers starts fsnotify watchers for all routes with a torrent folder
 // and returns them to be closed on shutdown.
-func StartRouteWatchers(s *Service, routes []*config.Route) ([]*RouteWatcher, error) {
+func StartRouteWatchers(s ServiceFacade, routes []*config.Route) ([]*RouteWatcher, error) {
 	var out []*RouteWatcher
 	for _, r := range routes {
 		if r.TorrentFolder == "" {
@@ -128,7 +145,7 @@ func StartRouteWatchers(s *Service, routes []*config.Route) ([]*RouteWatcher, er
 
 // StartRouteWatchersFromRoot scans a metadata routes root and starts a watcher for
 // each route directory found under it. Expected layout: <root>/<route>
-func StartRouteWatchersFromRoot(s *Service, root string) ([]*RouteWatcher, error) {
+func StartRouteWatchersFromRoot(s ServiceFacade, root string) ([]*RouteWatcher, error) {
 	var out []*RouteWatcher
 	// Walk only first level directories under root
 	entries, err := os.ReadDir(root)

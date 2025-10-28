@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/distribyted/distribyted/torrent"
 	"github.com/gin-gonic/gin"
+	"github.com/jkaberg/distribyted/torrent"
 )
 
 // registerQBittorrentAPI wires the minimal set of qBittorrent-compatible endpoints used by Arr apps.

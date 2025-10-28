@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/distribyted/distribyted/fs"
+	"github.com/jkaberg/distribyted/fs"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/webdav"
 )

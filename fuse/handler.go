@@ -6,7 +6,7 @@ import (
 	"runtime"
 
 	"github.com/billziss-gh/cgofuse/fuse"
-	"github.com/distribyted/distribyted/fs"
+	"github.com/jkaberg/distribyted/fs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -39,7 +39,6 @@ func (s *Handler) Mount(cfs *fs.ContainerFs) error {
 
 	host := fuse.NewFileSystemHost(NewFS(cfs))
 
-	// TODO improve error handling here
 	go func() {
 		var config []string
 
@@ -84,7 +83,6 @@ func (s *Handler) Unmount() {
 
 	ok := s.host.Unmount()
 	if !ok {
-		//TODO try to force unmount if possible
 		log.Error().Str("path", s.path).Msg("unmount failed")
 	}
 }
