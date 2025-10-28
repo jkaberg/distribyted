@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 #===============
 # Stage 2: Run
 #===============
-FROM alpine:3.20
+FROM alpine:3.22
 
 # Runtime dependencies
 RUN apk add --no-cache fuse libstdc++ libgcc su-exec
